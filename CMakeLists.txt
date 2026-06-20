@@ -25,6 +25,7 @@ add_library(cypherarx_core
   src/crypto/crypto.cpp
   src/crypto/kdf.cpp
   src/crypto/vault_key.cpp
+  src/passgen.cpp
   src/vault.cpp
 )
 target_include_directories(cypherarx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -61,6 +62,7 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_vault_key.cpp
     tests/test_vault.cpp
     tests/test_entries.cpp
+    tests/test_passgen.cpp
   )
   target_link_libraries(cypherarx_tests PRIVATE cypherarx_core GTest::gtest GTest::gtest_main)
   cypherarx_apply_sanitizers(cypherarx_tests)
