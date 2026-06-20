@@ -43,6 +43,7 @@ constexpr const char* kSchema =
     "CREATE TABLE IF NOT EXISTS entries ("
     "  id INTEGER PRIMARY KEY,"
     "  parent_id INTEGER,"
+    "  persona_id INTEGER,"
     "  entry_type TEXT,"
     "  label_enc BLOB NOT NULL,"
     "  url_enc BLOB,"
@@ -209,6 +210,10 @@ Vault::open(const std::string& path, std::span<const std::uint8_t> password) {
     if (!exec(vault.impl_->db, kSchema)) {
         return std::unexpected(VaultError::DatabaseError);
     }
+    // Migration: add entries.persona_id to vaults created before the two-parent model (§10.1.1).
+    // Harmlessly fails (ignored) when the column already exists.
+    sqlite3_exec(vault.impl_->db, "ALTER TABLE entries ADD COLUMN persona_id INTEGER", nullptr,
+                 nullptr, nullptr);
 
     const auto material = load_material(vault.impl_->db);
     if (!material) {
@@ -322,7 +327,8 @@ std::span<const std::uint8_t> blob_col(sqlite3_stmt* st, int i) {
 
 // Column order shared by get_entry / list_entries.
 constexpr const char* kEntryCols =
-    "id,parent_id,entry_type,label_enc,url_enc,login_url_enc,display_name_enc,notes_enc,uuid";
+    "id,parent_id,persona_id,entry_type,label_enc,url_enc,login_url_enc,display_name_enc,notes_enc,"
+    "uuid";
 
 std::optional<Entry> decode_entry(sqlite3_stmt* st, std::span<const std::uint8_t> dek) {
     Entry e;
@@ -330,14 +336,17 @@ std::optional<Entry> decode_entry(sqlite3_stmt* st, std::span<const std::uint8_t
     if (sqlite3_column_type(st, 1) != SQLITE_NULL) {
         e.parent_id = sqlite3_column_int64(st, 1);
     }
-    e.entry_type = text_col(st, 2);
-    e.uuid = text_col(st, 8);
+    if (sqlite3_column_type(st, 2) != SQLITE_NULL) {
+        e.persona_id = sqlite3_column_int64(st, 2);
+    }
+    e.entry_type = text_col(st, 3);
+    e.uuid = text_col(st, 9);
 
-    auto label = dec_text(dek, blob_col(st, 3), e.uuid, "label");
-    auto url = dec_text(dek, blob_col(st, 4), e.uuid, "url");
-    auto login_url = dec_text(dek, blob_col(st, 5), e.uuid, "login_url");
-    auto display_name = dec_text(dek, blob_col(st, 6), e.uuid, "display_name");
-    auto notes = dec_text(dek, blob_col(st, 7), e.uuid, "notes");
+    auto label = dec_text(dek, blob_col(st, 4), e.uuid, "label");
+    auto url = dec_text(dek, blob_col(st, 5), e.uuid, "url");
+    auto login_url = dec_text(dek, blob_col(st, 6), e.uuid, "login_url");
+    auto display_name = dec_text(dek, blob_col(st, 7), e.uuid, "display_name");
+    auto notes = dec_text(dek, blob_col(st, 8), e.uuid, "notes");
     if (!label || !url || !login_url || !display_name || !notes) {
         return std::nullopt;
     }
@@ -372,9 +381,9 @@ std::expected<Entry, VaultError> Vault::add_entry(const Entry& in) {
     }
 
     static const char* sql =
-        "INSERT INTO entries(parent_id,entry_type,label_enc,url_enc,login_url_enc,"
+        "INSERT INTO entries(parent_id,persona_id,entry_type,label_enc,url_enc,login_url_enc,"
         "display_name_enc,notes_enc,dek_id,created_at,updated_at,uuid,revision) "
-        "VALUES(?,?,?,?,?,?,?,1,?,?,?,1)";
+        "VALUES(?,?,?,?,?,?,?,?,1,?,?,?,1)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
@@ -384,15 +393,20 @@ std::expected<Entry, VaultError> Vault::add_entry(const Entry& in) {
     } else {
         sqlite3_bind_null(st, 1);
     }
-    sqlite3_bind_text(st, 2, e.entry_type.c_str(), -1, SQLITE_TRANSIENT);
-    bind_blob(st, 3, *label);
-    bind_blob(st, 4, *url);
-    bind_blob(st, 5, *login_url);
-    bind_blob(st, 6, *display_name);
-    bind_blob(st, 7, *notes);
-    sqlite3_bind_text(st, 8, ts.c_str(), -1, SQLITE_TRANSIENT);
+    if (e.persona_id) {
+        sqlite3_bind_int64(st, 2, *e.persona_id);
+    } else {
+        sqlite3_bind_null(st, 2);
+    }
+    sqlite3_bind_text(st, 3, e.entry_type.c_str(), -1, SQLITE_TRANSIENT);
+    bind_blob(st, 4, *label);
+    bind_blob(st, 5, *url);
+    bind_blob(st, 6, *login_url);
+    bind_blob(st, 7, *display_name);
+    bind_blob(st, 8, *notes);
     sqlite3_bind_text(st, 9, ts.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 10, e.uuid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 10, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 11, e.uuid.c_str(), -1, SQLITE_TRANSIENT);
     const bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     if (!ok) {

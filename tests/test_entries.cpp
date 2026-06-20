@@ -92,6 +92,34 @@ TEST_F(EntriesTest, ListEntries) {
     EXPECT_EQ((*list)[1].label, "B");
 }
 
+TEST_F(EntriesTest, AccountHasServiceAndPersonaParents) {
+    // §10.1.1: an account = service x persona (two parents of different kinds).
+    auto service = vault_->add_entry(make_entry("X", "service")).value();
+    auto persona = vault_->add_entry(make_entry("Handle1", "persona")).value();
+
+    Entry acc = make_entry("@handle", "account");
+    acc.parent_id = service.id;
+    acc.persona_id = persona.id;
+    auto added = vault_->add_entry(acc).value();
+    ASSERT_TRUE(added.parent_id.has_value());
+    ASSERT_TRUE(added.persona_id.has_value());
+    EXPECT_EQ(*added.parent_id, service.id);
+    EXPECT_EQ(*added.persona_id, persona.id);
+
+    auto got = vault_->get_entry(added.id).value();
+    ASSERT_TRUE(got.parent_id.has_value());
+    ASSERT_TRUE(got.persona_id.has_value());
+    EXPECT_EQ(*got.parent_id, service.id);
+    EXPECT_EQ(*got.persona_id, persona.id);
+}
+
+TEST_F(EntriesTest, PersonaIdIsOptional) {
+    // A service-only account (persona unspecified) keeps persona_id null.
+    auto e = vault_->add_entry(make_entry("Bank", "service")).value();
+    auto got = vault_->get_entry(e.id).value();
+    EXPECT_FALSE(got.persona_id.has_value());
+}
+
 TEST_F(EntriesTest, UpdateEntry) {
     auto e = vault_->add_entry(make_entry("Old")).value();
     e.label = "New";
