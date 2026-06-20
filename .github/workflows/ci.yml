@@ -41,11 +41,8 @@ jobs:
         run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" ctest --preset default
 
   sanitizers:
-    name: sanitizers (clang ASan/UBSan)
+    name: sanitizers (gcc ASan/UBSan)
     runs-on: ubuntu-latest
-    env:
-      CC: clang
-      CXX: clang++
     steps:
       - uses: actions/checkout@v4
 
