@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        shell: bash
+        run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" cmake --preset default
+
+      - name: Build
+        shell: bash
+        run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" cmake --build --preset default
+
+      - name: Test
+        shell: bash
+        run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" ctest --preset default
+
+  sanitizers:
+    name: sanitizers (clang ASan/UBSan)
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Configure (sanitizers on)
+        shell: bash
+        run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" cmake --preset default -DCYPHERARX_SANITIZE=ON
+
+      - name: Build
+        shell: bash
+        run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" cmake --build --preset default
+
+      - name: Test
+        shell: bash
+        run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" ctest --preset default

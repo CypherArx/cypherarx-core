@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "cypherarx-core",
+  "version": "0.0.1",
+  "description": "C++ core of CypherArx, a local-first native password manager.",
+  "dependencies": [
+    "libsodium",
+    "gtest"
+  ]
+}
