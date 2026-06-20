@@ -131,6 +131,33 @@ TEST_F(EntriesTest, AddFieldAndReadValueOnDemand) {
     EXPECT_EQ(std::memcmp(value->data(), "secret-value-123", value->size()), 0);
 }
 
+TEST_F(EntriesTest, UpdateField) {
+    auto e = vault_->add_entry(make_entry("Site")).value();
+    auto f = vault_->add_field(e.id, "login ID", "text", bytes("old-value"), "old memo").value();
+
+    ASSERT_TRUE(
+        vault_->update_field(f.id, "password", "password", bytes("new-secret"), "new memo")
+            .has_value());
+
+    auto fields = vault_->list_fields(e.id);
+    ASSERT_TRUE(fields.has_value());
+    ASSERT_EQ(fields->size(), 1u);
+    EXPECT_EQ((*fields)[0].label, "password");
+    EXPECT_EQ((*fields)[0].field_type, "password");
+    EXPECT_EQ((*fields)[0].notes, "new memo");
+
+    auto value = vault_->field_value(f.id);
+    ASSERT_TRUE(value.has_value());
+    ASSERT_EQ(value->size(), std::string_view("new-secret").size());
+    EXPECT_EQ(std::memcmp(value->data(), "new-secret", value->size()), 0);
+}
+
+TEST_F(EntriesTest, UpdateMissingFieldReturnsNotFound) {
+    auto r = vault_->update_field(9999, "x", "text", bytes("v"), "");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), VaultError::NotFound);
+}
+
 TEST_F(EntriesTest, DeleteFieldHidesIt) {
     auto e = vault_->add_entry(make_entry("Site")).value();
     auto f = vault_->add_field(e.id, "pw", "password", bytes("p"), "").value();

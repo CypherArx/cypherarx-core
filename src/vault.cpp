@@ -629,6 +629,67 @@ std::expected<Secret, VaultError> Vault::field_value(std::int64_t field_id) {
     return result;
 }
 
+std::expected<void, VaultError>
+Vault::update_field(std::int64_t field_id, const std::string& label,
+                    const std::string& field_type, std::span<const std::uint8_t> value,
+                    const std::string& notes) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    const auto dek = impl_->dek.bytes();
+
+    // The AAD binds each ciphertext to the field's uuid, so fetch it before re-encrypting.
+    std::string uuid;
+    {
+        static const char* q = "SELECT uuid FROM fields WHERE id=? AND deleted_at IS NULL";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(impl_->db, q, -1, &st, nullptr) != SQLITE_OK) {
+            return std::unexpected(VaultError::DatabaseError);
+        }
+        sqlite3_bind_int64(st, 1, field_id);
+        const bool found = sqlite3_step(st) == SQLITE_ROW;
+        if (found) {
+            uuid = text_col(st, 0);
+        }
+        sqlite3_finalize(st);
+        if (!found) {
+            return std::unexpected(VaultError::NotFound);
+        }
+    }
+
+    auto label_enc = enc_text(dek, label, uuid, "label");
+    auto value_enc = enc_bytes(dek, value, uuid, "value");
+    auto notes_enc = enc_text(dek, notes, uuid, "notes");
+    if (!label_enc || !value_enc || !notes_enc) {
+        return std::unexpected(VaultError::Internal);
+    }
+
+    static const char* sql =
+        "UPDATE fields SET label_enc=?,value_enc=?,notes_enc=?,field_type=?,"
+        "updated_at=?,revision=revision+1 WHERE id=? AND deleted_at IS NULL";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const std::string ts = now_iso8601();
+    bind_blob(st, 1, *label_enc);
+    bind_blob(st, 2, *value_enc);
+    bind_blob(st, 3, *notes_enc);
+    sqlite3_bind_text(st, 4, field_type.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 6, field_id);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    const int changed = sqlite3_changes(impl_->db);
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    if (changed == 0) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    return {};
+}
+
 std::expected<void, VaultError> Vault::delete_field(std::int64_t field_id) {
     if (!is_unlocked()) {
         return std::unexpected(VaultError::NotUnlocked);

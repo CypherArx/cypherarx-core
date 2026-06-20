@@ -78,6 +78,10 @@ public:
     std::expected<std::vector<Field>, VaultError> list_fields(std::int64_t entry_id);
     /// Fetch and decrypt a field's secret value into guarded memory (on demand).
     std::expected<Secret, VaultError> field_value(std::int64_t field_id);
+    /// Re-encrypt and update a field's label, type, secret value and notes (by `field_id`).
+    std::expected<void, VaultError>
+    update_field(std::int64_t field_id, const std::string& label, const std::string& field_type,
+                 std::span<const std::uint8_t> value, const std::string& notes);
     /// Soft-delete a field (tombstone for sync).
     std::expected<void, VaultError> delete_field(std::int64_t field_id);
 
