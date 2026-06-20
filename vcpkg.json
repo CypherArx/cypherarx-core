@@ -5,6 +5,7 @@
   "description": "C++ core of CypherArx, a local-first native password manager.",
   "dependencies": [
     "libsodium",
+    "sqlite3",
     "gtest"
   ]
 }
