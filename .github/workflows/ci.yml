@@ -24,6 +24,10 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install autotools (Linux, for vcpkg libsodium build)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
+
       - name: Configure
         shell: bash
         run: VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT" cmake --preset default
@@ -47,6 +51,9 @@ jobs:
 
       - name: Set up CMake and Ninja
         uses: lukka/get-cmake@latest
+
+      - name: Install autotools (for vcpkg libsodium build)
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool
 
       - name: Configure (sanitizers on)
         shell: bash
