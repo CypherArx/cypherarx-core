@@ -215,6 +215,36 @@ TEST_F(EntriesTest, DeleteFieldHidesIt) {
     EXPECT_EQ(vault_->field_value(f.id).error(), VaultError::NotFound);
 }
 
+TEST_F(EntriesTest, LoginMethodsWithOAuthLink) {
+    auto qiita = vault_->add_entry(make_entry("Qiita", "service")).value();
+    auto github = vault_->add_entry(make_entry("GitHub", "service")).value();
+
+    // Qiita can be logged into via GitHub (OAuth), and also via email+password.
+    auto oauth = vault_->add_login_method(qiita.id, "github", github.id, "OAuth via GitHub");
+    ASSERT_TRUE(oauth.has_value());
+    EXPECT_GT(oauth->id, 0);
+    ASSERT_TRUE(vault_->add_login_method(qiita.id, "email", std::nullopt, "").has_value());
+
+    auto list = vault_->list_login_methods(qiita.id);
+    ASSERT_TRUE(list.has_value());
+    ASSERT_EQ(list->size(), 2u);
+    EXPECT_EQ((*list)[0].method_type, "github");
+    ASSERT_TRUE((*list)[0].linked_entry_id.has_value());
+    EXPECT_EQ(*(*list)[0].linked_entry_id, github.id);
+    EXPECT_EQ((*list)[0].notes, "OAuth via GitHub");
+    EXPECT_EQ((*list)[1].method_type, "email");
+    EXPECT_FALSE((*list)[1].linked_entry_id.has_value());
+
+    ASSERT_TRUE(vault_->delete_login_method(oauth->id).has_value());
+    EXPECT_EQ(vault_->list_login_methods(qiita.id)->size(), 1u);
+}
+
+TEST_F(EntriesTest, DeleteMissingLoginMethodReturnsNotFound) {
+    auto r = vault_->delete_login_method(9999);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), VaultError::NotFound);
+}
+
 TEST_F(EntriesTest, DataSurvivesReopen) {
     auto e = vault_->add_entry(make_entry("Persistent")).value();
     ASSERT_TRUE(vault_->add_field(e.id, "k", "text", bytes("v"), ""));

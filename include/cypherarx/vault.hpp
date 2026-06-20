@@ -85,6 +85,18 @@ public:
     /// Soft-delete a field (tombstone for sync).
     std::expected<void, VaultError> delete_field(std::int64_t field_id);
 
+    // --- Login methods (reference-link layer, §10.1.1) ---
+
+    /// Record a way to log in to `entry_id`. `linked_entry_id` is the account you log in via
+    /// (OAuth / "log in with X"), or nullopt for a direct method (e.g. email+password).
+    std::expected<LoginMethod, VaultError>
+    add_login_method(std::int64_t entry_id, const std::string& method_type,
+                     std::optional<std::int64_t> linked_entry_id, const std::string& notes);
+    /// List an entry's non-deleted login methods.
+    std::expected<std::vector<LoginMethod>, VaultError> list_login_methods(std::int64_t entry_id);
+    /// Soft-delete a login method (tombstone for sync).
+    std::expected<void, VaultError> delete_login_method(std::int64_t id);
+
 private:
     Vault();
     struct Impl;

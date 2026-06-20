@@ -78,6 +78,20 @@ constexpr const char* kSchema =
     "  updated_at TEXT NOT NULL,"
     "  deleted_at TEXT,"
     "  device_id TEXT"
+    ");"
+    "CREATE TABLE IF NOT EXISTS login_methods ("
+    "  id INTEGER PRIMARY KEY,"
+    "  entry_id INTEGER,"
+    "  method_type TEXT NOT NULL,"
+    "  linked_entry_id INTEGER,"
+    "  notes_enc BLOB,"
+    "  sort_order INTEGER,"
+    "  dek_id INTEGER,"
+    "  uuid TEXT NOT NULL UNIQUE,"
+    "  revision INTEGER DEFAULT 1,"
+    "  updated_at TEXT NOT NULL,"
+    "  deleted_at TEXT,"
+    "  device_id TEXT"
     ");";
 
 VaultError map_key_error(VaultKeyError e) {
@@ -727,6 +741,116 @@ std::expected<void, VaultError> Vault::delete_field(std::int64_t field_id) {
     const std::string ts = now_iso8601();
     sqlite3_bind_text(st, 1, ts.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 2, field_id);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    const int changed = sqlite3_changes(impl_->db);
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    if (changed == 0) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    return {};
+}
+
+std::expected<LoginMethod, VaultError>
+Vault::add_login_method(std::int64_t entry_id, const std::string& method_type,
+                        std::optional<std::int64_t> linked_entry_id, const std::string& notes) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    const auto dek = impl_->dek.bytes();
+
+    LoginMethod m;
+    m.entry_id = entry_id;
+    m.method_type = method_type;
+    m.linked_entry_id = linked_entry_id;
+    m.notes = notes;
+    m.uuid = new_uuid();
+
+    auto notes_enc = enc_text(dek, notes, m.uuid, "notes");
+    if (!notes_enc) {
+        return std::unexpected(VaultError::Internal);
+    }
+
+    static const char* sql =
+        "INSERT INTO login_methods(entry_id,method_type,linked_entry_id,notes_enc,dek_id,uuid,"
+        "revision,updated_at) VALUES(?,?,?,?,1,?,1,?)";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const std::string ts = now_iso8601();
+    sqlite3_bind_int64(st, 1, entry_id);
+    sqlite3_bind_text(st, 2, method_type.c_str(), -1, SQLITE_TRANSIENT);
+    if (linked_entry_id) {
+        sqlite3_bind_int64(st, 3, *linked_entry_id);
+    } else {
+        sqlite3_bind_null(st, 3);
+    }
+    bind_blob(st, 4, *notes_enc);
+    sqlite3_bind_text(st, 5, m.uuid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 6, ts.c_str(), -1, SQLITE_TRANSIENT);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+
+    m.id = sqlite3_last_insert_rowid(impl_->db);
+    return m;
+}
+
+std::expected<std::vector<LoginMethod>, VaultError>
+Vault::list_login_methods(std::int64_t entry_id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql =
+        "SELECT id,entry_id,method_type,linked_entry_id,notes_enc,uuid FROM login_methods "
+        "WHERE entry_id=? AND deleted_at IS NULL ORDER BY sort_order, id";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    sqlite3_bind_int64(st, 1, entry_id);
+
+    std::vector<LoginMethod> out;
+    const auto dek = impl_->dek.bytes();
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        LoginMethod m;
+        m.id = sqlite3_column_int64(st, 0);
+        m.entry_id = sqlite3_column_int64(st, 1);
+        m.method_type = text_col(st, 2);
+        if (sqlite3_column_type(st, 3) != SQLITE_NULL) {
+            m.linked_entry_id = sqlite3_column_int64(st, 3);
+        }
+        m.uuid = text_col(st, 5);
+        auto notes = dec_text(dek, blob_col(st, 4), m.uuid, "notes");
+        if (!notes) {
+            sqlite3_finalize(st);
+            return std::unexpected(VaultError::Corrupt);
+        }
+        m.notes = std::move(*notes);
+        out.push_back(std::move(m));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::expected<void, VaultError> Vault::delete_login_method(std::int64_t id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql = "UPDATE login_methods SET deleted_at=?,revision=revision+1 "
+                             "WHERE id=? AND deleted_at IS NULL";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const std::string ts = now_iso8601();
+    sqlite3_bind_text(st, 1, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, id);
     const bool ok = sqlite3_step(st) == SQLITE_DONE;
     const int changed = sqlite3_changes(impl_->db);
     sqlite3_finalize(st);

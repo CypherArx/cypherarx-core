@@ -32,4 +32,15 @@ struct Field {
     std::string uuid;
 };
 
+/// How you log in to an entry. The reference-link layer of the model (§10.1.1): an entry may log
+/// in via another entry (OAuth / "log in with GitHub"), recorded by `linked_entry_id`.
+struct LoginMethod {
+    std::int64_t id = 0;
+    std::int64_t entry_id = 0;                        ///< The entry this login method belongs to.
+    std::string method_type;                          ///< "email"/"google"/"github"/... (plaintext).
+    std::optional<std::int64_t> linked_entry_id;      ///< The account you log in via (OAuth source).
+    std::string notes;                                ///< Decrypted notes.
+    std::string uuid;
+};
+
 } // namespace cypherarx
