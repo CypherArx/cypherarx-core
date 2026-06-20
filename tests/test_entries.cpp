@@ -131,6 +131,26 @@ TEST_F(EntriesTest, UpdateEntry) {
     EXPECT_EQ(got.notes, "changed");
 }
 
+TEST_F(EntriesTest, UpdateEntryReassignsServiceAndPersona) {
+    auto svc = vault_->add_entry(make_entry("X", "service")).value();
+    auto p1 = vault_->add_entry(make_entry("P1", "persona")).value();
+    auto p2 = vault_->add_entry(make_entry("P2", "persona")).value();
+
+    Entry a = make_entry("@h", "account");
+    a.parent_id = svc.id;
+    a.persona_id = p1.id;
+    auto acc = vault_->add_entry(a).value();
+
+    acc.persona_id = p2.id;  // move the account to another persona
+    ASSERT_TRUE(vault_->update_entry(acc).has_value());
+
+    auto got = vault_->get_entry(acc.id).value();
+    ASSERT_TRUE(got.parent_id.has_value());
+    ASSERT_TRUE(got.persona_id.has_value());
+    EXPECT_EQ(*got.parent_id, svc.id);
+    EXPECT_EQ(*got.persona_id, p2.id);
+}
+
 TEST_F(EntriesTest, DeleteEntryHidesIt) {
     auto e = vault_->add_entry(make_entry("Doomed")).value();
     ASSERT_TRUE(vault_->delete_entry(e.id).has_value());

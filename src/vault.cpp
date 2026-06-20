@@ -483,22 +483,32 @@ std::expected<void, VaultError> Vault::update_entry(const Entry& e) {
     }
 
     static const char* sql =
-        "UPDATE entries SET entry_type=?,label_enc=?,url_enc=?,login_url_enc=?,"
-        "display_name_enc=?,notes_enc=?,updated_at=?,revision=revision+1 "
+        "UPDATE entries SET parent_id=?,persona_id=?,entry_type=?,label_enc=?,url_enc=?,"
+        "login_url_enc=?,display_name_enc=?,notes_enc=?,updated_at=?,revision=revision+1 "
         "WHERE id=? AND deleted_at IS NULL";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
     }
     const std::string ts = now_iso8601();
-    sqlite3_bind_text(st, 1, e.entry_type.c_str(), -1, SQLITE_TRANSIENT);
-    bind_blob(st, 2, *label);
-    bind_blob(st, 3, *url);
-    bind_blob(st, 4, *login_url);
-    bind_blob(st, 5, *display_name);
-    bind_blob(st, 6, *notes);
-    sqlite3_bind_text(st, 7, ts.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 8, e.id);
+    if (e.parent_id) {
+        sqlite3_bind_int64(st, 1, *e.parent_id);
+    } else {
+        sqlite3_bind_null(st, 1);
+    }
+    if (e.persona_id) {
+        sqlite3_bind_int64(st, 2, *e.persona_id);
+    } else {
+        sqlite3_bind_null(st, 2);
+    }
+    sqlite3_bind_text(st, 3, e.entry_type.c_str(), -1, SQLITE_TRANSIENT);
+    bind_blob(st, 4, *label);
+    bind_blob(st, 5, *url);
+    bind_blob(st, 6, *login_url);
+    bind_blob(st, 7, *display_name);
+    bind_blob(st, 8, *notes);
+    sqlite3_bind_text(st, 9, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 10, e.id);
     const bool ok = sqlite3_step(st) == SQLITE_DONE;
     const int changed = sqlite3_changes(impl_->db);
     sqlite3_finalize(st);
