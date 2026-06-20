@@ -25,6 +25,7 @@ add_library(cypherarx_core
   src/crypto/crypto.cpp
   src/crypto/kdf.cpp
   src/crypto/vault_key.cpp
+  src/crypto/totp.cpp
   src/passgen.cpp
   src/vault.cpp
 )
@@ -63,6 +64,7 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_vault.cpp
     tests/test_entries.cpp
     tests/test_passgen.cpp
+    tests/test_totp.cpp
   )
   target_link_libraries(cypherarx_tests PRIVATE cypherarx_core GTest::gtest GTest::gtest_main)
   cypherarx_apply_sanitizers(cypherarx_tests)
