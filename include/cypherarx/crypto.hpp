@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "cypherarx/secret.hpp"
@@ -42,6 +43,9 @@ void random_bytes(std::span<std::uint8_t> buf);
 
 /// Generate a fresh random `aead::key_bytes` key in guarded memory.
 Secret generate_key();
+
+/// Generate a random RFC-4122 version-4 UUID string (e.g. for cross-device ids).
+std::string new_uuid();
 
 /// Encrypt `plaintext` with `key`, authenticating `aad`. Returns a self-describing
 /// blob (version || nonce || ciphertext || tag) with a fresh random nonce.

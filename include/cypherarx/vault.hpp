@@ -5,8 +5,11 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
+#include "cypherarx/entry.hpp"
 #include "cypherarx/kdf.hpp"
+#include "cypherarx/secret.hpp"
 
 namespace cypherarx {
 
@@ -20,6 +23,8 @@ enum class VaultError {
     KdfFailed,            ///< Argon2id failed.
     DatabaseError,        ///< Unexpected SQLite error.
     NotUnlocked,          ///< Operation requires an unlocked vault.
+    NotFound,             ///< Requested entry/field does not exist.
+    Internal,             ///< Unexpected internal error (e.g. encryption failure).
 };
 
 /// An encrypted vault backed by a single SQLite file. Owns the in-memory DEK once
@@ -49,6 +54,32 @@ public:
                            const KdfParams& new_params);
 
     [[nodiscard]] bool is_unlocked() const noexcept;
+
+    // --- Entries (text columns are encrypted at rest with the DEK) ---
+
+    /// Insert a new entry. `in.id`/`in.uuid` are ignored; the stored entry (with id + uuid) is returned.
+    std::expected<Entry, VaultError> add_entry(const Entry& in);
+    /// Fetch a single non-deleted entry by id.
+    std::expected<Entry, VaultError> get_entry(std::int64_t id);
+    /// List all non-deleted entries (ordered by id).
+    std::expected<std::vector<Entry>, VaultError> list_entries();
+    /// Re-encrypt and update the mutable text columns of an existing entry (by `e.id`).
+    std::expected<void, VaultError> update_entry(const Entry& e);
+    /// Soft-delete an entry (tombstone for sync).
+    std::expected<void, VaultError> delete_entry(std::int64_t id);
+
+    // --- Fields ---
+
+    /// Add a field to an entry. The secret `value` is encrypted; returns the stored Field (no value).
+    std::expected<Field, VaultError>
+    add_field(std::int64_t entry_id, const std::string& label, const std::string& field_type,
+              std::span<const std::uint8_t> value, const std::string& notes);
+    /// List an entry's non-deleted fields (without their secret values).
+    std::expected<std::vector<Field>, VaultError> list_fields(std::int64_t entry_id);
+    /// Fetch and decrypt a field's secret value into guarded memory (on demand).
+    std::expected<Secret, VaultError> field_value(std::int64_t field_id);
+    /// Soft-delete a field (tombstone for sync).
+    std::expected<void, VaultError> delete_field(std::int64_t field_id);
 
 private:
     Vault();

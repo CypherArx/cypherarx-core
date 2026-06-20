@@ -60,6 +60,7 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_kdf.cpp
     tests/test_vault_key.cpp
     tests/test_vault.cpp
+    tests/test_entries.cpp
   )
   target_link_libraries(cypherarx_tests PRIVATE cypherarx_core GTest::gtest GTest::gtest_main)
   cypherarx_apply_sanitizers(cypherarx_tests)

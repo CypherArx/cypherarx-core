@@ -1,5 +1,8 @@
 #include "cypherarx/crypto.hpp"
 
+#include <array>
+#include <string>
+
 #include <sodium.h>
 
 namespace cypherarx {
@@ -18,6 +21,25 @@ Secret generate_key() {
     Secret key(aead::key_bytes);
     randombytes_buf(key.data(), key.size());
     return key;
+}
+
+std::string new_uuid() {
+    std::array<std::uint8_t, 16> b{};
+    randombytes_buf(b.data(), b.size());
+    b[6] = static_cast<std::uint8_t>((b[6] & 0x0F) | 0x40); // version 4
+    b[8] = static_cast<std::uint8_t>((b[8] & 0x3F) | 0x80); // variant 1
+
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string s;
+    s.reserve(36);
+    for (std::size_t i = 0; i < b.size(); ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) {
+            s.push_back('-');
+        }
+        s.push_back(hex[b[i] >> 4]);
+        s.push_back(hex[b[i] & 0x0F]);
+    }
+    return s;
 }
 
 std::expected<std::vector<std::uint8_t>, CryptoError>
