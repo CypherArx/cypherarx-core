@@ -17,6 +17,7 @@ find_package(unofficial-sodium CONFIG REQUIRED)
 add_library(cypherarx_core
   src/crypto/secret.cpp
   src/crypto/crypto.cpp
+  src/crypto/kdf.cpp
 )
 target_include_directories(cypherarx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cypherarx_core PUBLIC unofficial-sodium::sodium)
@@ -45,6 +46,7 @@ if(CYPHERARX_BUILD_TESTS)
   add_executable(cypherarx_tests
     tests/test_secret.cpp
     tests/test_crypto.cpp
+    tests/test_kdf.cpp
   )
   target_link_libraries(cypherarx_tests PRIVATE cypherarx_core GTest::gtest GTest::gtest_main)
   cypherarx_apply_sanitizers(cypherarx_tests)
