@@ -44,7 +44,7 @@ protected:
         path_ = std::filesystem::temp_directory_path() /
                 ("cypherarx_entries_" + std::string(info->name()) + ".db");
         cleanup();
-        auto v = Vault::create(path_.string(), bytes("master-pass"), KdfParams::interactive());
+        auto v = Vault::create(path_, bytes("master-pass"), KdfParams::interactive());
         ASSERT_TRUE(v.has_value());
         vault_ = std::move(*v);
     }
@@ -55,8 +55,8 @@ protected:
     void cleanup() {
         std::error_code ec;
         std::filesystem::remove(path_, ec);
-        std::filesystem::remove(path_.string() + "-wal", ec);
-        std::filesystem::remove(path_.string() + "-shm", ec);
+        std::filesystem::remove(std::filesystem::path(path_) += "-wal", ec);
+        std::filesystem::remove(std::filesystem::path(path_) += "-shm", ec);
     }
 };
 
@@ -250,7 +250,7 @@ TEST_F(EntriesTest, DataSurvivesReopen) {
     ASSERT_TRUE(vault_->add_field(e.id, "k", "text", bytes("v"), ""));
     vault_.reset(); // close the file
 
-    auto reopened = Vault::open(path_.string(), bytes("master-pass"));
+    auto reopened = Vault::open(path_, bytes("master-pass"));
     ASSERT_TRUE(reopened.has_value());
 
     auto list = reopened->list_entries();

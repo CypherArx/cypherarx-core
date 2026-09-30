@@ -178,7 +178,7 @@ bool Vault::is_unlocked() const noexcept {
 }
 
 std::expected<Vault, VaultError>
-Vault::create(const std::string& path, std::span<const std::uint8_t> password,
+Vault::create(const std::filesystem::path& path, std::span<const std::uint8_t> password,
               const KdfParams& params) {
     std::error_code ec;
     if (std::filesystem::exists(path, ec)) {
@@ -186,7 +186,8 @@ Vault::create(const std::string& path, std::span<const std::uint8_t> password,
     }
 
     Vault vault;
-    if (sqlite3_open_v2(path.c_str(), &vault.impl_->db,
+    const std::u8string utf8 = path.u8string();
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(utf8.c_str()), &vault.impl_->db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::CannotOpenFile);
     }
@@ -209,15 +210,16 @@ Vault::create(const std::string& path, std::span<const std::uint8_t> password,
 }
 
 std::expected<Vault, VaultError>
-Vault::open(const std::string& path, std::span<const std::uint8_t> password) {
+Vault::open(const std::filesystem::path& path, std::span<const std::uint8_t> password) {
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) {
         return std::unexpected(VaultError::NotInitialized);
     }
 
     Vault vault;
-    if (sqlite3_open_v2(path.c_str(), &vault.impl_->db, SQLITE_OPEN_READWRITE, nullptr)
-        != SQLITE_OK) {
+    const std::u8string utf8 = path.u8string();
+    if (sqlite3_open_v2(reinterpret_cast<const char*>(utf8.c_str()), &vault.impl_->db,
+                        SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::CannotOpenFile);
     }
     // Idempotent: brings older vaults up to the current schema.

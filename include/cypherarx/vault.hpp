@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
@@ -40,12 +41,12 @@ public:
 
     /// Create a new vault file (must not already exist) and leave it unlocked.
     static std::expected<Vault, VaultError>
-    create(const std::string& path, std::span<const std::uint8_t> password,
+    create(const std::filesystem::path& path, std::span<const std::uint8_t> password,
            const KdfParams& params);
 
     /// Open an existing vault file and unlock it with the master password.
     static std::expected<Vault, VaultError>
-    open(const std::string& path, std::span<const std::uint8_t> password);
+    open(const std::filesystem::path& path, std::span<const std::uint8_t> password);
 
     /// Change the master password: KEK is regenerated, the DEK (and all data) is unchanged.
     std::expected<void, VaultError>

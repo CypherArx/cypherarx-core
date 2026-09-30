@@ -36,11 +36,11 @@ protected:
     void cleanup() {
         std::error_code ec;
         std::filesystem::remove(path_, ec);
-        std::filesystem::remove(path_.string() + "-wal", ec);
-        std::filesystem::remove(path_.string() + "-shm", ec);
+        std::filesystem::remove(std::filesystem::path(path_) += "-wal", ec);
+        std::filesystem::remove(std::filesystem::path(path_) += "-shm", ec);
     }
 
-    std::string path() const { return path_.string(); }
+    const std::filesystem::path& path() const { return path_; }
 };
 
 TEST_F(VaultFileTest, CreateLeavesVaultUnlocked) {
@@ -48,6 +48,17 @@ TEST_F(VaultFileTest, CreateLeavesVaultUnlocked) {
     ASSERT_TRUE(v.has_value());
     EXPECT_TRUE(v->is_unlocked());
     EXPECT_TRUE(std::filesystem::exists(path_));
+}
+
+TEST_F(VaultFileTest, NonAsciiPathRoundTrip) {
+    path_ = std::filesystem::temp_directory_path() / std::filesystem::path(u8"cypherarx_金庫_テスト.db");
+    cleanup();
+    { ASSERT_TRUE(Vault::create(path(), pw("master-pass"), KdfParams::interactive())); }
+    EXPECT_TRUE(std::filesystem::exists(path_));
+
+    auto v = Vault::open(path(), pw("master-pass"));
+    ASSERT_TRUE(v.has_value());
+    EXPECT_TRUE(v->is_unlocked());
 }
 
 TEST_F(VaultFileTest, CreateThenReopenWithPassword) {
