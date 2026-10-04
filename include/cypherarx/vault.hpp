@@ -25,6 +25,7 @@ enum class VaultError {
     DatabaseError,        ///< Unexpected SQLite error.
     NotUnlocked,          ///< Operation requires an unlocked vault.
     NotFound,             ///< Requested entry/field does not exist.
+    Forbidden,            ///< Operation not allowed on this row (e.g. deleting a preset category).
     Internal,             ///< Unexpected internal error (e.g. encryption failure).
 };
 
@@ -95,11 +96,42 @@ public:
                      std::optional<std::int64_t> linked_entry_id, const std::string& notes);
     /// List an entry's non-deleted login methods.
     std::expected<std::vector<LoginMethod>, VaultError> list_login_methods(std::int64_t entry_id);
+    /// Re-encrypt and update a login method's type, link and notes (by `id`).
+    std::expected<void, VaultError>
+    update_login_method(std::int64_t id, const std::string& method_type,
+                        std::optional<std::int64_t> linked_entry_id, const std::string& notes);
     /// Soft-delete a login method (tombstone for sync).
     std::expected<void, VaultError> delete_login_method(std::int64_t id);
 
+    // --- Categories (§10.3; presets are seeded on create and on first open) ---
+
+    std::expected<Category, VaultError>
+    add_category(const std::string& name, std::optional<std::int64_t> parent_id);
+    /// All non-deleted categories, presets first then by id.
+    std::expected<std::vector<Category>, VaultError> list_categories();
+    /// Rename / re-parent a custom category. Presets -> Forbidden.
+    std::expected<void, VaultError>
+    update_category(std::int64_t id, const std::string& name, std::optional<std::int64_t> parent_id);
+    /// Soft-delete a custom category; its children and entries become uncategorized. Presets -> Forbidden.
+    std::expected<void, VaultError> delete_category(std::int64_t id);
+
+    // --- Tags (§10.4) ---
+
+    /// Add a tag, or return the existing tag with the same name.
+    std::expected<Tag, VaultError> add_tag(const std::string& name);
+    std::expected<std::vector<Tag>, VaultError> list_tags();
+    std::expected<void, VaultError> rename_tag(std::int64_t id, const std::string& name);
+    /// Soft-delete a tag and remove it from every entry.
+    std::expected<void, VaultError> delete_tag(std::int64_t id);
+    /// Replace the set of tags attached to an entry.
+    std::expected<void, VaultError>
+    set_entry_tags(std::int64_t entry_id, const std::vector<std::int64_t>& tag_ids);
+    /// Tag ids attached to an entry (ordered by tag id).
+    std::expected<std::vector<std::int64_t>, VaultError> entry_tags(std::int64_t entry_id);
+
 private:
     Vault();
+    bool seed_presets();
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

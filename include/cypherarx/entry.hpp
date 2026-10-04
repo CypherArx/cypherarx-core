@@ -12,6 +12,8 @@ struct Entry {
     std::int64_t id = 0;                     ///< 0 = not yet persisted.
     std::optional<std::int64_t> parent_id;   ///< Service-axis parent (an account's service; a child's account).
     std::optional<std::int64_t> persona_id;  ///< Persona-axis parent. An account = service x persona (§10.1.1).
+    std::optional<std::int64_t> category_id; ///< Category (plaintext FK, §10.3). nullopt = uncategorized.
+    bool is_favorite = false;                ///< Plaintext flag (§10.1).
     std::string entry_type;                  ///< "service"/"persona"/"account"/"child" (plaintext).
     std::string label;                      ///< Display name, e.g. a bank name.
     std::string url;
@@ -29,6 +31,24 @@ struct Field {
     std::string label;        ///< Decrypted label, e.g. "login ID".
     std::string field_type;   ///< "text"/"password"/"totp"/... (plaintext).
     std::string notes;
+    std::string uuid;
+};
+
+/// A category node (§10.3). Names are encrypted at rest (presets included, so the column has one
+/// shape); `is_preset` rows cannot be deleted or renamed.
+struct Category {
+    std::int64_t id = 0;
+    std::optional<std::int64_t> parent_id;
+    std::string name;
+    bool is_preset = false;
+    std::string uuid;
+};
+
+/// A tag (§10.4). Names are encrypted at rest; uniqueness is enforced by the core on the decrypted
+/// name (`add_tag` returns the existing tag when the name already exists).
+struct Tag {
+    std::int64_t id = 0;
+    std::string name;
     std::string uuid;
 };
 

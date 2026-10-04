@@ -92,7 +92,39 @@ constexpr const char* kSchema =
     "  updated_at TEXT NOT NULL,"
     "  deleted_at TEXT,"
     "  device_id TEXT"
+    ");"
+    "CREATE TABLE IF NOT EXISTS categories ("
+    "  id INTEGER PRIMARY KEY,"
+    "  parent_id INTEGER,"
+    "  name_enc BLOB NOT NULL,"
+    "  is_preset INTEGER DEFAULT 0,"
+    "  sort_order INTEGER,"
+    "  dek_id INTEGER,"
+    "  uuid TEXT NOT NULL UNIQUE,"
+    "  revision INTEGER DEFAULT 1,"
+    "  updated_at TEXT NOT NULL,"
+    "  deleted_at TEXT,"
+    "  device_id TEXT"
+    ");"
+    "CREATE TABLE IF NOT EXISTS tags ("
+    "  id INTEGER PRIMARY KEY,"
+    "  name_enc BLOB NOT NULL,"
+    "  dek_id INTEGER,"
+    "  uuid TEXT NOT NULL UNIQUE,"
+    "  revision INTEGER DEFAULT 1,"
+    "  updated_at TEXT NOT NULL,"
+    "  deleted_at TEXT,"
+    "  device_id TEXT"
+    ");"
+    "CREATE TABLE IF NOT EXISTS entry_tags ("
+    "  entry_id INTEGER NOT NULL,"
+    "  tag_id INTEGER NOT NULL,"
+    "  PRIMARY KEY (entry_id, tag_id)"
     ");";
+
+// Seeded once per vault (§10.3). Encrypted like custom names so the column has one shape.
+constexpr const char* kPresetCategories[] = {"金融", "SNS", "ショッピング", "メール",
+                                             "ゲーム", "仕事", "その他"};
 
 VaultError map_key_error(VaultKeyError e) {
     switch (e) {
@@ -206,6 +238,9 @@ Vault::create(const std::filesystem::path& path, std::span<const std::uint8_t> p
 
     vault.impl_->dek = std::move(keys->first);
     vault.impl_->unlocked = true;
+    if (!vault.seed_presets()) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
     return vault;
 }
 
@@ -242,6 +277,9 @@ Vault::open(const std::filesystem::path& path, std::span<const std::uint8_t> pas
 
     vault.impl_->dek = std::move(dek).value();
     vault.impl_->unlocked = true;
+    if (!vault.seed_presets()) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
     return vault;
 }
 
@@ -341,22 +379,35 @@ std::span<const std::uint8_t> blob_col(sqlite3_stmt* st, int i) {
     return {p, static_cast<std::size_t>(n)};
 }
 
+void bind_opt_int64(sqlite3_stmt* st, int i, std::optional<std::int64_t> v) {
+    if (v) {
+        sqlite3_bind_int64(st, i, *v);
+    } else {
+        sqlite3_bind_null(st, i);
+    }
+}
+
+std::optional<std::int64_t> opt_int64_col(sqlite3_stmt* st, int i) {
+    if (sqlite3_column_type(st, i) == SQLITE_NULL) {
+        return std::nullopt;
+    }
+    return sqlite3_column_int64(st, i);
+}
+
 // Column order shared by get_entry / list_entries.
 constexpr const char* kEntryCols =
     "id,parent_id,persona_id,entry_type,label_enc,url_enc,login_url_enc,display_name_enc,notes_enc,"
-    "uuid";
+    "uuid,category_id,is_favorite";
 
 std::optional<Entry> decode_entry(sqlite3_stmt* st, std::span<const std::uint8_t> dek) {
     Entry e;
     e.id = sqlite3_column_int64(st, 0);
-    if (sqlite3_column_type(st, 1) != SQLITE_NULL) {
-        e.parent_id = sqlite3_column_int64(st, 1);
-    }
-    if (sqlite3_column_type(st, 2) != SQLITE_NULL) {
-        e.persona_id = sqlite3_column_int64(st, 2);
-    }
+    e.parent_id = opt_int64_col(st, 1);
+    e.persona_id = opt_int64_col(st, 2);
     e.entry_type = text_col(st, 3);
     e.uuid = text_col(st, 9);
+    e.category_id = opt_int64_col(st, 10);
+    e.is_favorite = sqlite3_column_int(st, 11) != 0;
 
     auto label = dec_text(dek, blob_col(st, 4), e.uuid, "label");
     auto url = dec_text(dek, blob_col(st, 5), e.uuid, "url");
@@ -398,22 +449,14 @@ std::expected<Entry, VaultError> Vault::add_entry(const Entry& in) {
 
     static const char* sql =
         "INSERT INTO entries(parent_id,persona_id,entry_type,label_enc,url_enc,login_url_enc,"
-        "display_name_enc,notes_enc,dek_id,created_at,updated_at,uuid,revision) "
-        "VALUES(?,?,?,?,?,?,?,?,1,?,?,?,1)";
+        "display_name_enc,notes_enc,dek_id,created_at,updated_at,uuid,revision,category_id,"
+        "is_favorite) VALUES(?,?,?,?,?,?,?,?,1,?,?,?,1,?,?)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
     }
-    if (e.parent_id) {
-        sqlite3_bind_int64(st, 1, *e.parent_id);
-    } else {
-        sqlite3_bind_null(st, 1);
-    }
-    if (e.persona_id) {
-        sqlite3_bind_int64(st, 2, *e.persona_id);
-    } else {
-        sqlite3_bind_null(st, 2);
-    }
+    bind_opt_int64(st, 1, e.parent_id);
+    bind_opt_int64(st, 2, e.persona_id);
     sqlite3_bind_text(st, 3, e.entry_type.c_str(), -1, SQLITE_TRANSIENT);
     bind_blob(st, 4, *label);
     bind_blob(st, 5, *url);
@@ -423,6 +466,8 @@ std::expected<Entry, VaultError> Vault::add_entry(const Entry& in) {
     sqlite3_bind_text(st, 9, ts.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 10, ts.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 11, e.uuid.c_str(), -1, SQLITE_TRANSIENT);
+    bind_opt_int64(st, 12, e.category_id);
+    sqlite3_bind_int(st, 13, e.is_favorite ? 1 : 0);
     const bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     if (!ok) {
@@ -500,23 +545,15 @@ std::expected<void, VaultError> Vault::update_entry(const Entry& e) {
 
     static const char* sql =
         "UPDATE entries SET parent_id=?,persona_id=?,entry_type=?,label_enc=?,url_enc=?,"
-        "login_url_enc=?,display_name_enc=?,notes_enc=?,updated_at=?,revision=revision+1 "
-        "WHERE id=? AND deleted_at IS NULL";
+        "login_url_enc=?,display_name_enc=?,notes_enc=?,updated_at=?,revision=revision+1,"
+        "category_id=?,is_favorite=? WHERE id=? AND deleted_at IS NULL";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
     }
     const std::string ts = now_iso8601();
-    if (e.parent_id) {
-        sqlite3_bind_int64(st, 1, *e.parent_id);
-    } else {
-        sqlite3_bind_null(st, 1);
-    }
-    if (e.persona_id) {
-        sqlite3_bind_int64(st, 2, *e.persona_id);
-    } else {
-        sqlite3_bind_null(st, 2);
-    }
+    bind_opt_int64(st, 1, e.parent_id);
+    bind_opt_int64(st, 2, e.persona_id);
     sqlite3_bind_text(st, 3, e.entry_type.c_str(), -1, SQLITE_TRANSIENT);
     bind_blob(st, 4, *label);
     bind_blob(st, 5, *url);
@@ -524,7 +561,9 @@ std::expected<void, VaultError> Vault::update_entry(const Entry& e) {
     bind_blob(st, 7, *display_name);
     bind_blob(st, 8, *notes);
     sqlite3_bind_text(st, 9, ts.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 10, e.id);
+    bind_opt_int64(st, 10, e.category_id);
+    sqlite3_bind_int(st, 11, e.is_favorite ? 1 : 0);
+    sqlite3_bind_int64(st, 12, e.id);
     const bool ok = sqlite3_step(st) == SQLITE_DONE;
     const int changed = sqlite3_changes(impl_->db);
     sqlite3_finalize(st);
@@ -840,6 +879,63 @@ Vault::list_login_methods(std::int64_t entry_id) {
     return out;
 }
 
+std::expected<void, VaultError>
+Vault::update_login_method(std::int64_t id, const std::string& method_type,
+                           std::optional<std::int64_t> linked_entry_id,
+                           const std::string& notes) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    const auto dek = impl_->dek.bytes();
+
+    std::string uuid;
+    {
+        static const char* q = "SELECT uuid FROM login_methods WHERE id=? AND deleted_at IS NULL";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(impl_->db, q, -1, &st, nullptr) != SQLITE_OK) {
+            return std::unexpected(VaultError::DatabaseError);
+        }
+        sqlite3_bind_int64(st, 1, id);
+        const bool found = sqlite3_step(st) == SQLITE_ROW;
+        if (found) {
+            uuid = text_col(st, 0);
+        }
+        sqlite3_finalize(st);
+        if (!found) {
+            return std::unexpected(VaultError::NotFound);
+        }
+    }
+
+    auto notes_enc = enc_text(dek, notes, uuid, "notes");
+    if (!notes_enc) {
+        return std::unexpected(VaultError::Internal);
+    }
+
+    static const char* sql =
+        "UPDATE login_methods SET method_type=?,linked_entry_id=?,notes_enc=?,updated_at=?,"
+        "revision=revision+1 WHERE id=? AND deleted_at IS NULL";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const std::string ts = now_iso8601();
+    sqlite3_bind_text(st, 1, method_type.c_str(), -1, SQLITE_TRANSIENT);
+    bind_opt_int64(st, 2, linked_entry_id);
+    bind_blob(st, 3, *notes_enc);
+    sqlite3_bind_text(st, 4, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 5, id);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    const int changed = sqlite3_changes(impl_->db);
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    if (changed == 0) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    return {};
+}
+
 std::expected<void, VaultError> Vault::delete_login_method(std::int64_t id) {
     if (!is_unlocked()) {
         return std::unexpected(VaultError::NotUnlocked);
@@ -863,6 +959,398 @@ std::expected<void, VaultError> Vault::delete_login_method(std::int64_t id) {
         return std::unexpected(VaultError::NotFound);
     }
     return {};
+}
+
+// --- Categories / tags ---
+
+namespace {
+
+// Encrypted-name row shared by categories and tags: INSERT with a fresh uuid, or UPDATE by id.
+// Returns the new row id (insert) or the number of changed rows (update), nullopt on SQL error.
+std::optional<std::int64_t> insert_named(sqlite3* db, std::span<const std::uint8_t> dek,
+                                         const char* sql, const std::string& name,
+                                         const std::string& uuid,
+                                         std::optional<std::int64_t> parent_id, int is_preset,
+                                         bool with_parent) {
+    auto name_enc = enc_text(dek, name, uuid, "name");
+    if (!name_enc) {
+        return std::nullopt;
+    }
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::nullopt;
+    }
+    const std::string ts = now_iso8601();
+    int i = 1;
+    if (with_parent) {
+        bind_opt_int64(st, i++, parent_id);
+    }
+    bind_blob(st, i++, *name_enc);
+    if (with_parent) {
+        sqlite3_bind_int(st, i++, is_preset);
+    }
+    sqlite3_bind_text(st, i++, uuid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, i++, ts.c_str(), -1, SQLITE_TRANSIENT);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::nullopt;
+    }
+    return sqlite3_last_insert_rowid(db);
+}
+
+std::optional<std::string> uuid_of(sqlite3* db, const char* table, std::int64_t id,
+                                   int* is_preset_out) {
+    const std::string sql = std::string("SELECT uuid,") +
+                            (is_preset_out ? "is_preset" : "0") + " FROM " + table +
+                            " WHERE id=? AND deleted_at IS NULL";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+        return std::nullopt;
+    }
+    sqlite3_bind_int64(st, 1, id);
+    std::optional<std::string> out;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        out = text_col(st, 0);
+        if (is_preset_out) {
+            *is_preset_out = sqlite3_column_int(st, 1);
+        }
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+bool exec_int64(sqlite3* db, const char* sql, std::int64_t a, std::optional<std::int64_t> b = {}) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, a);
+    if (b) {
+        sqlite3_bind_int64(st, 2, *b);
+    }
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool exec_text_int64(sqlite3* db, const char* sql, const std::string& text, std::int64_t id) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(st, 1, text.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, id);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+} // namespace
+
+bool Vault::seed_presets() {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, "SELECT COUNT(*) FROM categories", -1, &st, nullptr)
+        != SQLITE_OK) {
+        return false;
+    }
+    std::int64_t count = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        count = sqlite3_column_int64(st, 0);
+    }
+    sqlite3_finalize(st);
+    if (count > 0) {
+        return true;
+    }
+    if (!exec(impl_->db, "BEGIN")) {
+        return false;
+    }
+    static const char* sql =
+        "INSERT INTO categories(parent_id,name_enc,is_preset,dek_id,uuid,revision,updated_at) "
+        "VALUES(?,?,?,1,?,1,?)";
+    for (const char* name : kPresetCategories) {
+        if (!insert_named(impl_->db, impl_->dek.bytes(), sql, name, new_uuid(), std::nullopt, 1,
+                          true)) {
+            exec(impl_->db, "ROLLBACK");
+            return false;
+        }
+    }
+    return exec(impl_->db, "COMMIT");
+}
+
+std::expected<Category, VaultError>
+Vault::add_category(const std::string& name, std::optional<std::int64_t> parent_id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    Category c;
+    c.parent_id = parent_id;
+    c.name = name;
+    c.uuid = new_uuid();
+    static const char* sql =
+        "INSERT INTO categories(parent_id,name_enc,is_preset,dek_id,uuid,revision,updated_at) "
+        "VALUES(?,?,?,1,?,1,?)";
+    auto id = insert_named(impl_->db, impl_->dek.bytes(), sql, name, c.uuid, parent_id, 0, true);
+    if (!id) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    c.id = *id;
+    return c;
+}
+
+std::expected<std::vector<Category>, VaultError> Vault::list_categories() {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql = "SELECT id,parent_id,name_enc,is_preset,uuid FROM categories "
+                             "WHERE deleted_at IS NULL ORDER BY is_preset DESC, sort_order, id";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::vector<Category> out;
+    const auto dek = impl_->dek.bytes();
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        Category c;
+        c.id = sqlite3_column_int64(st, 0);
+        c.parent_id = opt_int64_col(st, 1);
+        c.is_preset = sqlite3_column_int(st, 3) != 0;
+        c.uuid = text_col(st, 4);
+        auto name = dec_text(dek, blob_col(st, 2), c.uuid, "name");
+        if (!name) {
+            sqlite3_finalize(st);
+            return std::unexpected(VaultError::Corrupt);
+        }
+        c.name = std::move(*name);
+        out.push_back(std::move(c));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::expected<void, VaultError>
+Vault::update_category(std::int64_t id, const std::string& name,
+                       std::optional<std::int64_t> parent_id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    int is_preset = 0;
+    const auto uuid = uuid_of(impl_->db, "categories", id, &is_preset);
+    if (!uuid) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    if (is_preset) {
+        return std::unexpected(VaultError::Forbidden);
+    }
+    if (parent_id && *parent_id == id) {
+        return std::unexpected(VaultError::Forbidden);
+    }
+    auto name_enc = enc_text(impl_->dek.bytes(), name, *uuid, "name");
+    if (!name_enc) {
+        return std::unexpected(VaultError::Internal);
+    }
+    static const char* sql = "UPDATE categories SET parent_id=?,name_enc=?,updated_at=?,"
+                             "revision=revision+1 WHERE id=? AND deleted_at IS NULL";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const std::string ts = now_iso8601();
+    bind_opt_int64(st, 1, parent_id);
+    bind_blob(st, 2, *name_enc);
+    sqlite3_bind_text(st, 3, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, id);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+std::expected<void, VaultError> Vault::delete_category(std::int64_t id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    int is_preset = 0;
+    if (!uuid_of(impl_->db, "categories", id, &is_preset)) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    if (is_preset) {
+        return std::unexpected(VaultError::Forbidden);
+    }
+    const std::string ts = now_iso8601();
+    if (!exec(impl_->db, "BEGIN")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const bool ok =
+        exec_text_int64(impl_->db,
+                        "UPDATE categories SET deleted_at=?,revision=revision+1 WHERE id=?", ts,
+                        id) &&
+        exec_text_int64(impl_->db,
+                        "UPDATE categories SET parent_id=NULL,updated_at=?,revision=revision+1 "
+                        "WHERE parent_id=? AND deleted_at IS NULL",
+                        ts, id) &&
+        exec_text_int64(impl_->db,
+                        "UPDATE entries SET category_id=NULL,updated_at=?,revision=revision+1 "
+                        "WHERE category_id=? AND deleted_at IS NULL",
+                        ts, id);
+    if (!ok || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+std::expected<Tag, VaultError> Vault::add_tag(const std::string& name) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    auto existing = list_tags();
+    if (!existing) {
+        return std::unexpected(existing.error());
+    }
+    for (auto& t : *existing) {
+        if (t.name == name) {
+            return std::move(t);
+        }
+    }
+    Tag t;
+    t.name = name;
+    t.uuid = new_uuid();
+    static const char* sql =
+        "INSERT INTO tags(name_enc,dek_id,uuid,revision,updated_at) VALUES(?,1,?,1,?)";
+    auto id = insert_named(impl_->db, impl_->dek.bytes(), sql, name, t.uuid, std::nullopt, 0, false);
+    if (!id) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    t.id = *id;
+    return t;
+}
+
+std::expected<std::vector<Tag>, VaultError> Vault::list_tags() {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql = "SELECT id,name_enc,uuid FROM tags WHERE deleted_at IS NULL ORDER BY id";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::vector<Tag> out;
+    const auto dek = impl_->dek.bytes();
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        Tag t;
+        t.id = sqlite3_column_int64(st, 0);
+        t.uuid = text_col(st, 2);
+        auto name = dec_text(dek, blob_col(st, 1), t.uuid, "name");
+        if (!name) {
+            sqlite3_finalize(st);
+            return std::unexpected(VaultError::Corrupt);
+        }
+        t.name = std::move(*name);
+        out.push_back(std::move(t));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::expected<void, VaultError> Vault::rename_tag(std::int64_t id, const std::string& name) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    const auto uuid = uuid_of(impl_->db, "tags", id, nullptr);
+    if (!uuid) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    auto name_enc = enc_text(impl_->dek.bytes(), name, *uuid, "name");
+    if (!name_enc) {
+        return std::unexpected(VaultError::Internal);
+    }
+    static const char* sql = "UPDATE tags SET name_enc=?,updated_at=?,revision=revision+1 "
+                             "WHERE id=? AND deleted_at IS NULL";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const std::string ts = now_iso8601();
+    bind_blob(st, 1, *name_enc);
+    sqlite3_bind_text(st, 2, ts.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, id);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+std::expected<void, VaultError> Vault::delete_tag(std::int64_t id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    if (!uuid_of(impl_->db, "tags", id, nullptr)) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    const std::string ts = now_iso8601();
+    if (!exec(impl_->db, "BEGIN")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    const bool ok =
+        exec_text_int64(impl_->db, "UPDATE tags SET deleted_at=?,revision=revision+1 WHERE id=?",
+                        ts, id) &&
+        exec_int64(impl_->db, "DELETE FROM entry_tags WHERE tag_id=?", id);
+    if (!ok || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+std::expected<void, VaultError>
+Vault::set_entry_tags(std::int64_t entry_id, const std::vector<std::int64_t>& tag_ids) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    if (!uuid_of(impl_->db, "entries", entry_id, nullptr)) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    if (!exec(impl_->db, "BEGIN")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    bool ok = exec_int64(impl_->db, "DELETE FROM entry_tags WHERE entry_id=?", entry_id);
+    for (const auto tag_id : tag_ids) {
+        ok = ok && exec_int64(impl_->db,
+                              "INSERT OR IGNORE INTO entry_tags(entry_id,tag_id) VALUES(?,?)",
+                              entry_id, tag_id);
+    }
+    ok = ok && exec_text_int64(impl_->db,
+                               "UPDATE entries SET updated_at=?,revision=revision+1 WHERE id=?",
+                               now_iso8601(), entry_id);
+    if (!ok || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+std::expected<std::vector<std::int64_t>, VaultError> Vault::entry_tags(std::int64_t entry_id) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql = "SELECT et.tag_id FROM entry_tags et JOIN tags t ON t.id=et.tag_id "
+                             "WHERE et.entry_id=? AND t.deleted_at IS NULL ORDER BY et.tag_id";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    sqlite3_bind_int64(st, 1, entry_id);
+    std::vector<std::int64_t> out;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out.push_back(sqlite3_column_int64(st, 0));
+    }
+    sqlite3_finalize(st);
+    return out;
 }
 
 } // namespace cypherarx
