@@ -6,6 +6,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "cypherarx/entry.hpp"
@@ -128,6 +129,8 @@ public:
     set_entry_tags(std::int64_t entry_id, const std::vector<std::int64_t>& tag_ids);
     /// Tag ids attached to an entry (ordered by tag id).
     std::expected<std::vector<std::int64_t>, VaultError> entry_tags(std::int64_t entry_id);
+    /// Every (entry_id, tag_id) pair for non-deleted entries and tags, for building filters.
+    std::expected<std::vector<std::pair<std::int64_t, std::int64_t>>, VaultError> list_entry_tags();
 
 private:
     Vault();

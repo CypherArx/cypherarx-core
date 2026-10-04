@@ -1353,4 +1353,25 @@ std::expected<std::vector<std::int64_t>, VaultError> Vault::entry_tags(std::int6
     return out;
 }
 
+std::expected<std::vector<std::pair<std::int64_t, std::int64_t>>, VaultError>
+Vault::list_entry_tags() {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql =
+        "SELECT et.entry_id,et.tag_id FROM entry_tags et "
+        "JOIN tags t ON t.id=et.tag_id JOIN entries e ON e.id=et.entry_id "
+        "WHERE t.deleted_at IS NULL AND e.deleted_at IS NULL ORDER BY et.entry_id, et.tag_id";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::vector<std::pair<std::int64_t, std::int64_t>> out;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out.emplace_back(sqlite3_column_int64(st, 0), sqlite3_column_int64(st, 1));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
 } // namespace cypherarx

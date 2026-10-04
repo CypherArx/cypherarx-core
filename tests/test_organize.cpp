@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -165,6 +166,23 @@ TEST_F(OrganizeTest, EntryTagsSetReplaceAndDelete) {
     ASSERT_TRUE(vault_->delete_tag(t2.id).has_value());
     EXPECT_EQ(vault_->entry_tags(e.id).value(), (std::vector<std::int64_t>{t3.id}));
     EXPECT_EQ(vault_->list_tags()->size(), 2u);
+}
+
+TEST_F(OrganizeTest, ListEntryTagsSkipsDeletedEntriesAndTags) {
+    Entry a = service("A");
+    Entry b = service("B");
+    auto t1 = vault_->add_tag("t1").value();
+    auto t2 = vault_->add_tag("t2").value();
+    ASSERT_TRUE(vault_->set_entry_tags(a.id, {t1.id, t2.id}).has_value());
+    ASSERT_TRUE(vault_->set_entry_tags(b.id, {t2.id}).has_value());
+
+    using Pair = std::pair<std::int64_t, std::int64_t>;
+    EXPECT_EQ(vault_->list_entry_tags().value(),
+              (std::vector<Pair>{{a.id, t1.id}, {a.id, t2.id}, {b.id, t2.id}}));
+
+    ASSERT_TRUE(vault_->delete_entry(b.id).has_value());
+    ASSERT_TRUE(vault_->delete_tag(t1.id).has_value());
+    EXPECT_EQ(vault_->list_entry_tags().value(), (std::vector<Pair>{{a.id, t2.id}}));
 }
 
 TEST_F(OrganizeTest, SetTagsOnMissingEntryFails) {
