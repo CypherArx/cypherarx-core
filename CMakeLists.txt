@@ -64,10 +64,12 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_vault.cpp
     tests/test_entries.cpp
     tests/test_organize.cpp
+    tests/test_settings.cpp
     tests/test_passgen.cpp
     tests/test_totp.cpp
   )
-  target_link_libraries(cypherarx_tests PRIVATE cypherarx_core GTest::gtest GTest::gtest_main)
+  target_link_libraries(cypherarx_tests PRIVATE cypherarx_core unofficial::sqlite3::sqlite3
+                        GTest::gtest GTest::gtest_main)
   cypherarx_apply_sanitizers(cypherarx_tests)
 
   include(GoogleTest)

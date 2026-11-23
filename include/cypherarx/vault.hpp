@@ -12,6 +12,7 @@
 #include "cypherarx/entry.hpp"
 #include "cypherarx/kdf.hpp"
 #include "cypherarx/secret.hpp"
+#include "cypherarx/settings.hpp"
 
 namespace cypherarx {
 
@@ -28,6 +29,7 @@ enum class VaultError {
     NotFound,             ///< Requested entry/field does not exist.
     Forbidden,            ///< Operation not allowed on this row (e.g. deleting a preset category).
     Internal,             ///< Unexpected internal error (e.g. encryption failure).
+    InvalidValue,
 };
 
 /// An encrypted vault backed by a single SQLite file. Owns the in-memory DEK once
@@ -131,6 +133,9 @@ public:
     std::expected<std::vector<std::int64_t>, VaultError> entry_tags(std::int64_t entry_id);
     /// Every (entry_id, tag_id) pair for non-deleted entries and tags, for building filters.
     std::expected<std::vector<std::pair<std::int64_t, std::int64_t>>, VaultError> list_entry_tags();
+
+    std::expected<Settings, VaultError> settings();
+    std::expected<void, VaultError> set_settings(const Settings& settings);
 
 private:
     Vault();

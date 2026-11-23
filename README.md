@@ -19,6 +19,17 @@ GUI lives in a separate repository, `cypherarx-gui`).
 Vault paths are `std::filesystem::path`; the core converts them to UTF-8 for SQLite
 itself, so non-ASCII paths work on every platform.
 
+Vault settings (`cypherarx/settings.hpp`, `Vault::settings` and `Vault::set_settings`) are
+the values that belong to one vault and may be read only after it is unlocked: how long the
+access log is kept, the session length, the idle lock and so on. The core stores them and
+does not act on them; the application does. Each value is one row of the `settings` table,
+encrypted with the DEK and bound to its key, so a value cannot be moved to another key. A
+write stores every key, so the table does not show which ones were changed. A key that is
+not stored reads as its default, a key this version does not know is left alone, and a value
+that does not decrypt or parse is reported as `Corrupt` rather than replaced by a default.
+What has to be known before a vault is open does not go here; that is the application's
+own preferences file.
+
 ## Tech
 
 - **C++23**, libsodium (XChaCha20-Poly1305 / Argon2id), SQLite3

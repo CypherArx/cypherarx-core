@@ -1,5 +1,6 @@
 #include "cypherarx/vault.hpp"
 
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -120,6 +121,11 @@ constexpr const char* kSchema =
     "  entry_id INTEGER NOT NULL,"
     "  tag_id INTEGER NOT NULL,"
     "  PRIMARY KEY (entry_id, tag_id)"
+    ");"
+    "CREATE TABLE IF NOT EXISTS settings ("
+    "  key TEXT PRIMARY KEY,"
+    "  value_enc BLOB NOT NULL,"
+    "  dek_id INTEGER"
     ");";
 
 // Seeded once per vault (§10.3). Encrypted like custom names so the column has one shape.
@@ -1372,6 +1378,133 @@ Vault::list_entry_tags() {
     }
     sqlite3_finalize(st);
     return out;
+}
+
+namespace {
+
+constexpr std::string_view kSettingsScope = "settings";
+constexpr const char* kTrue = "1";
+constexpr const char* kFalse = "0";
+
+struct IntSetting {
+    const char* key;
+    int Settings::* value;
+    int minimum;
+};
+
+struct BoolSetting {
+    const char* key;
+    bool Settings::* value;
+};
+
+constexpr IntSetting kIntSettings[] = {
+    {"log_retention_days", &Settings::log_retention_days, 0},
+    {"session_duration_minutes", &Settings::session_duration_minutes, 1},
+    {"session_lock_idle_minutes", &Settings::session_lock_idle_minutes, 0},
+};
+
+constexpr BoolSetting kBoolSettings[] = {
+    {"session_use_os_keyring", &Settings::session_use_os_keyring},
+    {"session_lock_on_screensaver", &Settings::session_lock_on_screensaver},
+    {"session_require_password_for_export", &Settings::session_require_password_for_export},
+};
+
+bool parse_setting(std::string_view text, int minimum, int& out) {
+    int v = 0;
+    const auto r = std::from_chars(text.data(), text.data() + text.size(), v);
+    if (r.ec != std::errc{} || r.ptr != text.data() + text.size() || v < minimum) {
+        return false;
+    }
+    out = v;
+    return true;
+}
+
+bool parse_setting(std::string_view text, bool& out) {
+    if (text != kTrue && text != kFalse) {
+        return false;
+    }
+    out = text == kTrue;
+    return true;
+}
+
+bool put_setting(sqlite3* db, std::span<const std::uint8_t> dek, const char* key,
+                 const std::string& text) {
+    const auto enc = enc_text(dek, text, kSettingsScope, key);
+    if (!enc) {
+        return false;
+    }
+    static const char* sql = "INSERT INTO settings(key,value_enc) VALUES(?,?) "
+                             "ON CONFLICT(key) DO UPDATE SET value_enc=excluded.value_enc";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_TRANSIENT);
+    bind_blob(st, 2, *enc);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    return ok;
+}
+
+} // namespace
+
+std::expected<Settings, VaultError> Vault::settings() {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, "SELECT key,value_enc FROM settings", -1, &st, nullptr) !=
+        SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    Settings out;
+    bool corrupt = false;
+    while (!corrupt && sqlite3_step(st) == SQLITE_ROW) {
+        const std::string key = text_col(st, 0);
+        for (const IntSetting& f : kIntSettings) {
+            if (key == f.key) {
+                const auto text = dec_text(impl_->dek.bytes(), blob_col(st, 1), kSettingsScope, key);
+                corrupt = !text || !parse_setting(*text, f.minimum, out.*f.value);
+            }
+        }
+        for (const BoolSetting& f : kBoolSettings) {
+            if (key == f.key) {
+                const auto text = dec_text(impl_->dek.bytes(), blob_col(st, 1), kSettingsScope, key);
+                corrupt = !text || !parse_setting(*text, out.*f.value);
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    if (corrupt) {
+        return std::unexpected(VaultError::Corrupt);
+    }
+    return out;
+}
+
+std::expected<void, VaultError> Vault::set_settings(const Settings& settings) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    for (const IntSetting& f : kIntSettings) {
+        if (settings.*f.value < f.minimum) {
+            return std::unexpected(VaultError::InvalidValue);
+        }
+    }
+    if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    bool ok = true;
+    for (const IntSetting& f : kIntSettings) {
+        ok = ok && put_setting(impl_->db, impl_->dek.bytes(), f.key, std::to_string(settings.*f.value));
+    }
+    for (const BoolSetting& f : kBoolSettings) {
+        ok = ok && put_setting(impl_->db, impl_->dek.bytes(), f.key, settings.*f.value ? kTrue : kFalse);
+    }
+    if (!ok || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
 }
 
 } // namespace cypherarx
