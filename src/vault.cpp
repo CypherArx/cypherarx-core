@@ -1803,6 +1803,7 @@ namespace {
 
 constexpr const char* kServiceType = "service";
 constexpr const char* kAccountType = "account";
+constexpr const char* kPersonaType = "persona";
 
 std::string lowered(std::string_view text) {
     std::string out(text);
@@ -1833,12 +1834,17 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
     }
     std::map<std::string, std::int64_t> services;
     std::set<std::pair<std::int64_t, std::string>> accounts;
+    bool persona_found = !options.persona_id.has_value();
     for (const Entry& e : *existing) {
+        persona_found = persona_found || (e.id == *options.persona_id && e.entry_type == kPersonaType);
         if (e.entry_type == kServiceType) {
             services.emplace(service_key(e.url, e.label), e.id);
         } else if (e.entry_type == kAccountType && e.parent_id) {
             accounts.emplace(*e.parent_id, e.label);
         }
+    }
+    if (!persona_found) {
+        return std::unexpected(VaultError::NotFound);
     }
     if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
         return std::unexpected(VaultError::DatabaseError);
@@ -1873,6 +1879,7 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
         Entry account;
         account.entry_type = kAccountType;
         account.parent_id = service->second;
+        account.persona_id = options.persona_id;
         account.label = std::string(login.username);
         account.login_url = std::string(login.url);
         account.notes = std::string(login.notes);

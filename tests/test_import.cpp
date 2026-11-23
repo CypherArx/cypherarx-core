@@ -293,6 +293,48 @@ TEST_F(ImportVaultTest, AddsToAServiceThatIsAlreadyThere) {
     EXPECT_EQ(of_type("service").front().label, "My name for it");
 }
 
+TEST_F(ImportVaultTest, GivesEveryImportedAccountTheChosenPersona) {
+    Entry persona;
+    persona.entry_type = "persona";
+    persona.label = "Me";
+    const Entry stored = vault_->add_entry(persona).value();
+    const Parsed p("name,url,username,password\n"
+                   "A,https://a.example,me,pw\n"
+                   "B,https://b.example,me,pw\n");
+    ASSERT_TRUE(p.logins.has_value());
+    ImportOptions options;
+    options.persona_id = stored.id;
+    const auto summary = vault_->import_logins(*p.logins, options);
+    ASSERT_TRUE(summary.has_value());
+    EXPECT_EQ(*summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 4}));
+    for (const Entry& account : of_type("account")) {
+        EXPECT_EQ(account.persona_id, stored.id);
+    }
+    for (const Entry& service : of_type("service")) {
+        EXPECT_FALSE(service.persona_id.has_value());
+    }
+}
+
+TEST_F(ImportVaultTest, WithoutAPersonaTheAccountsHaveNone) {
+    import("name,url,username,password\nA,https://a.example,me,pw\n");
+    EXPECT_FALSE(of_type("account").front().persona_id.has_value());
+}
+
+TEST_F(ImportVaultTest, APersonaThatIsNotAPersonaIsRefusedAndNothingIsAdded) {
+    Entry service;
+    service.entry_type = "service";
+    service.label = "Not a persona";
+    const Entry stored = vault_->add_entry(service).value();
+    const Parsed p("name,url,username,password\nA,https://a.example,me,pw\n");
+    ASSERT_TRUE(p.logins.has_value());
+    ImportOptions options;
+    options.persona_id = stored.id;
+    EXPECT_EQ(vault_->import_logins(*p.logins, options).error(), VaultError::NotFound);
+    options.persona_id = 987654;
+    EXPECT_EQ(vault_->import_logins(*p.logins, options).error(), VaultError::NotFound);
+    EXPECT_EQ(vault_->list_entries().value().size(), 1u);
+}
+
 TEST_F(ImportVaultTest, ARowWithoutAUserNameGetsNoIdentifierField) {
     const ImportSummary summary = import("name,url,username,password\n"
                                          "Example,https://example.com,,pw\n");

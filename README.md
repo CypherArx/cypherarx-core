@@ -86,7 +86,9 @@ the shape is all that is checked, and the value is kept either way), the passwor
 TOTP secret (taken out of an `otpauth://` URL). The user name is a field as well as the
 account's name because an account has any number of identifiers of equal standing (an
 email address, a phone number, a handle), an export carries one of them, and a field is
-what can be copied and added to. A row with nothing to store is
+what can be copied and added to. Every imported account is
+given the persona of `ImportOptions::persona_id` when one is set (it must be a persona
+entry, or nothing is imported). A row with nothing to store is
 skipped, and so is a row whose site and user name are already there, so importing a file
 twice adds nothing; a changed password in the second file is therefore not picked up. The
 summary counts what was added and what was skipped.

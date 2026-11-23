@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -38,6 +40,7 @@ struct ImportOptions {
     std::string email_label = "Email";
     std::string id_label = "ID";
     std::string identifier_type = "text";
+    std::optional<std::int64_t> persona_id;
 };
 
 struct ImportSummary {
