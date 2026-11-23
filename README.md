@@ -41,6 +41,29 @@ reads a clock: every call takes the current time in Unix seconds. The setting
 purging decrypt every record, as the retention keeps their number small. A record that does
 not decrypt or parse is `Corrupt`, and purging stops without deleting anything.
 
+Key rotation (`Vault::rotate_key`) replaces the DEK. It takes the master password, because
+the new DEK has to be wrapped under the KEK and the KEK is not kept after unlocking. In one
+database transaction it makes a new DEK, decrypts every encrypted value with the old one
+and encrypts it with the new one (deleted rows too), and stores the new wrapped DEK with a
+fresh salt; then the new DEK replaces the old one in memory. A failure at any point, a wrong
+password or a value that does not decrypt leaves the vault exactly as it was. The old and
+the new key never coexist in the file, so there is no table of keys and no per-row key id
+to follow: this is simpler than the staged, resumable rotation of the design document
+(§6.2, §6.3), whose guarantee the transaction already gives. The encrypted columns are
+listed once, in `kEncryptedColumns` in `src/vault.cpp`; a new encrypted column must be
+added there, and `tests/test_rotation.cpp` fails for any column ending in `_enc` that the
+rotation left unchanged or that the test has no data for.
+
+After the commit the file is rewritten (`secure_delete` and `VACUUM`) so the old ciphertext
+and the old wrapped DEK are no longer in it; if that step fails the rotation has still
+happened and the call returns `ScrubFailed`. What the core cannot reach is outside the
+file: the rollback journal and the temporary file SQLite deletes, earlier copies and
+backups, and blocks the file system or an SSD has not yet reused. Rotation protects against
+a leaked DEK. It does not help against a leaked master password by itself, since the new
+DEK is wrapped under the same password, and changing the master password does not rotate
+the DEK: whoever has the old password and an old copy of the file can still read a newer
+copy unless the key is rotated as well.
+
 ## Tech
 
 - **C++23**, libsodium (XChaCha20-Poly1305 / Argon2id), SQLite3

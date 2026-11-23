@@ -32,6 +32,7 @@ enum class VaultError {
     Forbidden,            ///< Operation not allowed on this row (e.g. deleting a preset category).
     Internal,             ///< Unexpected internal error (e.g. encryption failure).
     InvalidValue,
+    ScrubFailed,
 };
 
 /// An encrypted vault backed by a single SQLite file. Owns the in-memory DEK once
@@ -59,6 +60,8 @@ public:
     change_master_password(std::span<const std::uint8_t> old_password,
                            std::span<const std::uint8_t> new_password,
                            const KdfParams& new_params);
+
+    std::expected<void, VaultError> rotate_key(std::span<const std::uint8_t> password);
 
     [[nodiscard]] bool is_unlocked() const noexcept;
 

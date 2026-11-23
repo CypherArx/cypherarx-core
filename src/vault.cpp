@@ -1681,4 +1681,120 @@ std::expected<std::size_t, VaultError> Vault::purge_access_records(std::int64_t 
     return removed;
 }
 
+namespace {
+
+struct EncryptedColumn {
+    const char* table;
+    const char* scope;
+    const char* column;
+    const char* kind;
+};
+
+constexpr EncryptedColumn kEncryptedColumns[] = {
+    {"entries", "uuid", "label_enc", "'label'"},
+    {"entries", "uuid", "url_enc", "'url'"},
+    {"entries", "uuid", "login_url_enc", "'login_url'"},
+    {"entries", "uuid", "display_name_enc", "'display_name'"},
+    {"entries", "uuid", "notes_enc", "'notes'"},
+    {"fields", "uuid", "label_enc", "'label'"},
+    {"fields", "uuid", "value_enc", "'value'"},
+    {"fields", "uuid", "notes_enc", "'notes'"},
+    {"login_methods", "uuid", "notes_enc", "'notes'"},
+    {"categories", "uuid", "name_enc", "'name'"},
+    {"tags", "uuid", "name_enc", "'name'"},
+    {"settings", "'settings'", "value_enc", "key"},
+    {"access_logs", "uuid", "value_enc", "'access'"},
+};
+
+struct Reencrypted {
+    std::int64_t rowid;
+    std::vector<std::uint8_t> blob;
+};
+
+std::expected<void, VaultError> reencrypt_column(sqlite3* db, const EncryptedColumn& c,
+                                                 std::span<const std::uint8_t> old_dek,
+                                                 std::span<const std::uint8_t> new_dek) {
+    const std::string select = std::format("SELECT rowid,{},{},{} FROM {} WHERE {} IS NOT NULL", c.scope,
+                                           c.kind, c.column, c.table, c.column);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, select.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::vector<Reencrypted> rows;
+    std::optional<VaultError> failure;
+    while (!failure && sqlite3_step(st) == SQLITE_ROW) {
+        const std::vector<std::uint8_t> aad = aad_for(text_col(st, 1), text_col(st, 2));
+        const auto plain = aead_decrypt(old_dek, blob_col(st, 3), aad);
+        if (!plain) {
+            failure = VaultError::Corrupt;
+            break;
+        }
+        auto blob = aead_encrypt(new_dek, plain->bytes(), aad);
+        if (!blob) {
+            failure = VaultError::Internal;
+            break;
+        }
+        rows.push_back({sqlite3_column_int64(st, 0), std::move(*blob)});
+    }
+    sqlite3_finalize(st);
+    if (failure) {
+        return std::unexpected(*failure);
+    }
+    const std::string update = std::format("UPDATE {} SET {}=? WHERE rowid=?", c.table, c.column);
+    if (sqlite3_prepare_v2(db, update.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    bool ok = true;
+    for (const Reencrypted& row : rows) {
+        bind_blob(st, 1, row.blob);
+        sqlite3_bind_int64(st, 2, row.rowid);
+        ok = ok && sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_reset(st);
+    }
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+} // namespace
+
+std::expected<void, VaultError> Vault::rotate_key(std::span<const std::uint8_t> password) {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    const auto current = load_material(impl_->db);
+    if (!current) {
+        return std::unexpected(VaultError::Corrupt);
+    }
+    const auto verified = unlock_vault(password, *current);
+    if (!verified) {
+        return std::unexpected(map_key_error(verified.error()));
+    }
+    auto keys = create_vault_keys(password, current->params);
+    if (!keys) {
+        return std::unexpected(map_key_error(keys.error()));
+    }
+    if (!exec(impl_->db, "PRAGMA secure_delete=ON") || !exec(impl_->db, "BEGIN IMMEDIATE")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    for (const EncryptedColumn& c : kEncryptedColumns) {
+        const auto done = reencrypt_column(impl_->db, c, impl_->dek.bytes(), keys->first.bytes());
+        if (!done) {
+            exec(impl_->db, "ROLLBACK");
+            return std::unexpected(done.error());
+        }
+    }
+    if (!store_material(impl_->db, keys->second) || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    impl_->dek = std::move(keys->first);
+    if (!exec(impl_->db, "VACUUM")) {
+        return std::unexpected(VaultError::ScrubFailed);
+    }
+    return {};
+}
+
 } // namespace cypherarx
