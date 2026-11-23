@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "cypherarx/access_log.hpp"
 #include "cypherarx/entry.hpp"
 #include "cypherarx/kdf.hpp"
 #include "cypherarx/secret.hpp"
@@ -136,6 +138,11 @@ public:
 
     std::expected<Settings, VaultError> settings();
     std::expected<void, VaultError> set_settings(const Settings& settings);
+
+    std::expected<void, VaultError>
+    record_access(std::int64_t entry_id, AccessAction action, std::int64_t now);
+    std::expected<std::vector<AccessRecord>, VaultError> access_records(std::int64_t now);
+    std::expected<std::size_t, VaultError> purge_access_records(std::int64_t now);
 
 private:
     Vault();

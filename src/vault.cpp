@@ -122,6 +122,12 @@ constexpr const char* kSchema =
     "  tag_id INTEGER NOT NULL,"
     "  PRIMARY KEY (entry_id, tag_id)"
     ");"
+    "CREATE TABLE IF NOT EXISTS access_logs ("
+    "  id INTEGER PRIMARY KEY,"
+    "  value_enc BLOB NOT NULL,"
+    "  dek_id INTEGER,"
+    "  uuid TEXT NOT NULL UNIQUE"
+    ");"
     "CREATE TABLE IF NOT EXISTS settings ("
     "  key TEXT PRIMARY KEY,"
     "  value_enc BLOB NOT NULL,"
@@ -1505,6 +1511,174 @@ std::expected<void, VaultError> Vault::set_settings(const Settings& settings) {
         return std::unexpected(VaultError::DatabaseError);
     }
     return {};
+}
+
+namespace {
+
+constexpr std::string_view kAccessKind = "access";
+constexpr char kAccessSeparator = '\n';
+constexpr std::int64_t kSecondsPerDay = 24 * 60 * 60;
+
+struct AccessActionName {
+    AccessAction action;
+    std::string_view name;
+};
+
+constexpr AccessActionName kAccessActions[] = {
+    {AccessAction::view, "view"},
+    {AccessAction::copy, "copy"},
+};
+
+std::string_view name_of(AccessAction action) {
+    for (const AccessActionName& a : kAccessActions) {
+        if (a.action == action) {
+            return a.name;
+        }
+    }
+    return {};
+}
+
+struct AccessRow {
+    std::int64_t id = 0;
+    std::string entry_uuid;
+    std::optional<AccessAction> action;
+    std::int64_t accessed_at = 0;
+};
+
+bool parse_access(std::string_view text, AccessRow& row) {
+    const auto first = text.find(kAccessSeparator);
+    const auto second = first == std::string_view::npos ? first : text.find(kAccessSeparator, first + 1);
+    if (second == std::string_view::npos) {
+        return false;
+    }
+    const std::string_view action = text.substr(first + 1, second - first - 1);
+    const std::string_view at = text.substr(second + 1);
+    const auto r = std::from_chars(at.data(), at.data() + at.size(), row.accessed_at);
+    if (first == 0 || r.ec != std::errc{} || r.ptr != at.data() + at.size()) {
+        return false;
+    }
+    row.entry_uuid = std::string(text.substr(0, first));
+    row.action.reset();
+    for (const AccessActionName& a : kAccessActions) {
+        if (a.name == action) {
+            row.action = a.action;
+        }
+    }
+    return true;
+}
+
+std::expected<std::vector<AccessRow>, VaultError>
+read_access_rows(sqlite3* db, std::span<const std::uint8_t> dek) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT id,uuid,value_enc FROM access_logs ORDER BY id", -1, &st,
+                           nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::vector<AccessRow> rows;
+    bool corrupt = false;
+    while (!corrupt && sqlite3_step(st) == SQLITE_ROW) {
+        AccessRow row;
+        row.id = sqlite3_column_int64(st, 0);
+        const auto text = dec_text(dek, blob_col(st, 2), text_col(st, 1), kAccessKind);
+        corrupt = !text || !parse_access(*text, row);
+        rows.push_back(std::move(row));
+    }
+    sqlite3_finalize(st);
+    if (corrupt) {
+        return std::unexpected(VaultError::Corrupt);
+    }
+    return rows;
+}
+
+std::int64_t oldest_kept(const Settings& settings, std::int64_t now) {
+    return now - settings.log_retention_days * kSecondsPerDay;
+}
+
+} // namespace
+
+std::expected<void, VaultError>
+Vault::record_access(std::int64_t entry_id, AccessAction action, std::int64_t now) {
+    const auto current = settings();
+    if (!current) {
+        return std::unexpected(current.error());
+    }
+    const auto entry_uuid = uuid_of(impl_->db, "entries", entry_id, nullptr);
+    if (!entry_uuid) {
+        return std::unexpected(VaultError::NotFound);
+    }
+    if (current->log_retention_days == 0) {
+        return {};
+    }
+    std::string text = *entry_uuid;
+    text += kAccessSeparator;
+    text += name_of(action);
+    text += kAccessSeparator;
+    text += std::to_string(now);
+    const std::string uuid = new_uuid();
+    const auto enc = enc_text(impl_->dek.bytes(), text, uuid, kAccessKind);
+    if (!enc) {
+        return std::unexpected(VaultError::Internal);
+    }
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, "INSERT INTO access_logs(value_enc,uuid) VALUES(?,?)", -1, &st,
+                           nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    bind_blob(st, 1, *enc);
+    sqlite3_bind_text(st, 2, uuid.c_str(), -1, SQLITE_TRANSIENT);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return {};
+}
+
+std::expected<std::vector<AccessRecord>, VaultError> Vault::access_records(std::int64_t now) {
+    const auto current = settings();
+    if (!current) {
+        return std::unexpected(current.error());
+    }
+    const auto rows = read_access_rows(impl_->db, impl_->dek.bytes());
+    if (!rows) {
+        return std::unexpected(rows.error());
+    }
+    const std::int64_t oldest = oldest_kept(*current, now);
+    std::vector<AccessRecord> out;
+    for (const AccessRow& row : *rows) {
+        if (row.action && row.accessed_at > oldest) {
+            out.push_back({row.entry_uuid, *row.action, row.accessed_at});
+        }
+    }
+    return out;
+}
+
+std::expected<std::size_t, VaultError> Vault::purge_access_records(std::int64_t now) {
+    const auto current = settings();
+    if (!current) {
+        return std::unexpected(current.error());
+    }
+    const auto rows = read_access_rows(impl_->db, impl_->dek.bytes());
+    if (!rows) {
+        return std::unexpected(rows.error());
+    }
+    const std::int64_t oldest = oldest_kept(*current, now);
+    if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::size_t removed = 0;
+    bool ok = true;
+    for (const AccessRow& row : *rows) {
+        if (ok && row.accessed_at <= oldest) {
+            ok = exec_int64(impl_->db, "DELETE FROM access_logs WHERE id=?", row.id);
+            ++removed;
+        }
+    }
+    if (!ok || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    return removed;
 }
 
 } // namespace cypherarx

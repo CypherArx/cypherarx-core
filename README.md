@@ -30,6 +30,17 @@ that does not decrypt or parse is reported as `Corrupt` rather than replaced by 
 What has to be known before a vault is open does not go here; that is the application's
 own preferences file.
 
+The access log (`cypherarx/access_log.hpp`, `Vault::record_access`, `access_records` and
+`purge_access_records`) records that an entry was viewed or a value copied, for a "recently
+used" list and a ranking by use. A record is the entry's uuid, the action and the time,
+encrypted as one value, so the file shows only how many records there are. Each record is
+bound to a random id of its own row, so one cannot be copied over another. The core never
+reads a clock: every call takes the current time in Unix seconds. The setting
+`log_retention_days` decides how long a record counts: older records are not returned and
+`purge_access_records` deletes them, and with 0 nothing is recorded at all. Reading and
+purging decrypt every record, as the retention keeps their number small. A record that does
+not decrypt or parse is `Corrupt`, and purging stops without deleting anything.
+
 ## Tech
 
 - **C++23**, libsodium (XChaCha20-Poly1305 / Argon2id), SQLite3

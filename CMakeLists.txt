@@ -65,6 +65,7 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_entries.cpp
     tests/test_organize.cpp
     tests/test_settings.cpp
+    tests/test_access_log.cpp
     tests/test_passgen.cpp
     tests/test_totp.cpp
   )
