@@ -147,6 +147,48 @@ TEST_F(MergeTest, RefusesAnythingButTwoDifferentServices) {
     EXPECT_EQ(vault_->get_entry(a.id).value().parent_id, x.id);
 }
 
+TEST_F(MergeTest, SetsOrClearsThePersonaOfSeveralAccounts) {
+    const Entry x = service("X");
+    Entry persona;
+    persona.entry_type = "persona";
+    persona.label = "Me";
+    const Entry me = vault_->add_entry(persona).value();
+    const Entry a = account(x.id, "a");
+    const Entry b = account(x.id, "b");
+    const Entry c = account(x.id, "c");
+
+    const std::vector<std::int64_t> two{a.id, b.id};
+    ASSERT_TRUE(vault_->set_accounts_persona(two, me.id).has_value());
+    EXPECT_EQ(vault_->get_entry(a.id).value().persona_id, me.id);
+    EXPECT_EQ(vault_->get_entry(b.id).value().persona_id, me.id);
+    EXPECT_FALSE(vault_->get_entry(c.id).value().persona_id.has_value());
+    EXPECT_EQ(vault_->get_entry(a.id).value().parent_id, x.id);
+    EXPECT_EQ(vault_->get_entry(a.id).value().label, "a");
+
+    const std::vector<std::int64_t> one{a.id};
+    ASSERT_TRUE(vault_->set_accounts_persona(one, std::nullopt).has_value());
+    EXPECT_FALSE(vault_->get_entry(a.id).value().persona_id.has_value());
+    EXPECT_EQ(vault_->get_entry(b.id).value().persona_id, me.id);
+}
+
+TEST_F(MergeTest, SettingThePersonaIsAllOrNothing) {
+    const Entry x = service("X");
+    Entry persona;
+    persona.entry_type = "persona";
+    persona.label = "Me";
+    const Entry me = vault_->add_entry(persona).value();
+    const Entry a = account(x.id, "a");
+
+    const std::vector<std::int64_t> with_service{a.id, x.id};
+    EXPECT_EQ(vault_->set_accounts_persona(with_service, me.id).error(), VaultError::Forbidden);
+    const std::vector<std::int64_t> with_missing{a.id, 987654};
+    EXPECT_EQ(vault_->set_accounts_persona(with_missing, me.id).error(), VaultError::NotFound);
+    const std::vector<std::int64_t> one{a.id};
+    EXPECT_EQ(vault_->set_accounts_persona(one, x.id).error(), VaultError::Forbidden);
+    EXPECT_EQ(vault_->set_accounts_persona(one, 987654).error(), VaultError::NotFound);
+    EXPECT_FALSE(vault_->get_entry(a.id).value().persona_id.has_value());
+}
+
 TEST_F(MergeTest, TheMergedDataSurvivesReopening) {
     const Entry x = service("X");
     const Entry dotcom = service("");

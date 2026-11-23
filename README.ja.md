@@ -116,6 +116,10 @@ Email、そうでなければ ID という名前を付けます。見るのは�
 使っていた account は、使っていた URL を保ちます。target のログイン URL が別のものなら、
 source のものを account に書きます。
 
+`Vault::set_accounts_persona(ids, persona)` は、複数の account に 1 つの名義を付けます
+（名義なしにもできます）。1 つのトランザクションで行い、id がすべて account で、名義が
+persona のエントリでなければ、何も変えません。
+
 ## 技術
 
 - **C++23**、libsodium（XChaCha20-Poly1305 / Argon2id）、SQLite3

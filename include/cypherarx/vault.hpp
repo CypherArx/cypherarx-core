@@ -150,6 +150,8 @@ public:
 
     std::expected<std::vector<EntryUrl>, VaultError> urls();
     std::expected<void, VaultError> merge_service(std::int64_t source_id, std::int64_t target_id);
+    std::expected<void, VaultError> set_accounts_persona(std::span<const std::int64_t> account_ids,
+                                                         std::optional<std::int64_t> persona_id);
 
     std::expected<ImportSummary, VaultError>
     import_logins(std::span<const ImportedLogin> logins, const ImportOptions& options = {});

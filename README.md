@@ -116,6 +116,10 @@ is deleted. The target takes the source's login URL when it has none. An account
 no login URL of its own, and so used its service's, keeps the URL it used: when the
 target's login URL is a different one, the source's is written to the account.
 
+`Vault::set_accounts_persona(ids, persona)` gives several accounts one persona, or none, in
+one transaction: every id must be an account and the persona a persona entry, or nothing
+is changed.
+
 ## Tech
 
 - **C++23**, libsodium (XChaCha20-Poly1305 / Argon2id), SQLite3

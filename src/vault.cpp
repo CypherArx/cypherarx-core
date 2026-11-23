@@ -2064,4 +2064,46 @@ std::expected<void, VaultError> Vault::merge_service(std::int64_t source_id, std
     return {};
 }
 
+std::expected<void, VaultError> Vault::set_accounts_persona(std::span<const std::int64_t> account_ids,
+                                                            std::optional<std::int64_t> persona_id) {
+    if (persona_id) {
+        const auto persona = get_entry(*persona_id);
+        if (!persona) {
+            return std::unexpected(persona.error());
+        }
+        if (persona->entry_type != kPersonaType) {
+            return std::unexpected(VaultError::Forbidden);
+        }
+    } else if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    std::vector<Entry> accounts;
+    for (const std::int64_t id : account_ids) {
+        auto account = get_entry(id);
+        if (!account) {
+            return std::unexpected(account.error());
+        }
+        if (account->entry_type != kAccountType) {
+            return std::unexpected(VaultError::Forbidden);
+        }
+        accounts.push_back(std::move(*account));
+    }
+    if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::optional<VaultError> failure;
+    for (Entry& account : accounts) {
+        account.persona_id = persona_id;
+        if (const auto updated = update_entry(account); !updated) {
+            failure = updated.error();
+            break;
+        }
+    }
+    if (failure || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(failure.value_or(VaultError::DatabaseError));
+    }
+    return {};
+}
+
 } // namespace cypherarx
