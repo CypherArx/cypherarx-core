@@ -1439,7 +1439,7 @@ bool put_setting(sqlite3* db, std::span<const std::uint8_t> dek, const char* key
     if (!enc) {
         return false;
     }
-    static const char* sql = "INSERT INTO settings(key,value_enc) VALUES(?,?) "
+    static const char* sql = "INSERT INTO settings(key,value_enc,dek_id) VALUES(?,?,1) "
                              "ON CONFLICT(key) DO UPDATE SET value_enc=excluded.value_enc";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -1620,7 +1620,7 @@ Vault::record_access(std::int64_t entry_id, AccessAction action, std::int64_t no
         return std::unexpected(VaultError::Internal);
     }
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(impl_->db, "INSERT INTO access_logs(value_enc,uuid) VALUES(?,?)", -1, &st,
+    if (sqlite3_prepare_v2(impl_->db, "INSERT INTO access_logs(value_enc,uuid,dek_id) VALUES(?,?,1)", -1, &st,
                            nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
     }
