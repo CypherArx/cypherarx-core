@@ -28,12 +28,16 @@ std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_csv(std::spa
 
 std::string_view import_site(std::string_view url);
 std::string_view totp_secret(std::string_view value);
+bool is_email_shaped(std::string_view text);
 
 struct ImportOptions {
     std::string password_label = "Password";
     std::string totp_label = "TOTP";
     std::string password_type = "password";
     std::string totp_type = "totp";
+    std::string email_label = "Email";
+    std::string id_label = "ID";
+    std::string identifier_type = "text";
 };
 
 struct ImportSummary {

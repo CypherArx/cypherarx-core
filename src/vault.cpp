@@ -1883,6 +1883,17 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
         }
         accounts.emplace(service->second, account.label);
         ++summary.accounts;
+        if (!login.username.empty()) {
+            const std::string& label =
+                is_email_shaped(login.username) ? options.email_label : options.id_label;
+            const auto field =
+                add_field(added->id, label, options.identifier_type, as_bytes(login.username), {});
+            if (!field) {
+                failure = field.error();
+                break;
+            }
+            ++summary.fields;
+        }
         if (!login.password.empty()) {
             const auto field = add_field(added->id, options.password_label, options.password_type,
                                          as_bytes(login.password), {});

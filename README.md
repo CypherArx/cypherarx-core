@@ -80,8 +80,13 @@ and 1Password 1PUX are not read.
 `import_logins` stores the rows in one transaction. Rows are grouped by site, the host of
 the URL compared without case, or the name when there is no URL: one service entry per
 site, reusing a service that is already in the vault, and one account entry per row under
-it, named by the user name, with the password and the TOTP secret (taken out of an
-`otpauth://` URL) as its fields and the note as its notes. A row with nothing to store is
+it, named by the user name, with the note as its notes. Its fields are the user name
+itself (labelled as an email address when it has the shape of one, as an ID otherwise;
+the shape is all that is checked, and the value is kept either way), the password and the
+TOTP secret (taken out of an `otpauth://` URL). The user name is a field as well as the
+account's name because an account has any number of identifiers of equal standing (an
+email address, a phone number, a handle), an export carries one of them, and a field is
+what can be copied and added to. A row with nothing to store is
 skipped, and so is a row whose site and user name are already there, so importing a file
 twice adds nothing; a changed password in the second file is therefore not picked up. The
 summary counts what was added and what was skipped.

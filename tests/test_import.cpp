@@ -130,6 +130,22 @@ TEST(TotpSecret, TakesTheSecretOfAnOtpAuthUrl) {
     EXPECT_EQ(totp_secret(""), "");
 }
 
+TEST(EmailShape, TellsAnAddressFromAPlainId) {
+    EXPECT_TRUE(is_email_shaped("user@example.com"));
+    EXPECT_TRUE(is_email_shaped("first.last+tag@mail.example.co.jp"));
+    EXPECT_FALSE(is_email_shaped("user"));
+    EXPECT_FALSE(is_email_shaped("@handle"));
+    EXPECT_FALSE(is_email_shaped("user@"));
+    EXPECT_FALSE(is_email_shaped("user@localhost"));
+    EXPECT_FALSE(is_email_shaped("user@.com"));
+    EXPECT_FALSE(is_email_shaped("user@example."));
+    EXPECT_FALSE(is_email_shaped("user@example..com"));
+    EXPECT_FALSE(is_email_shaped("a@b@example.com"));
+    EXPECT_FALSE(is_email_shaped("user name@example.com"));
+    EXPECT_FALSE(is_email_shaped("090-1234-5678"));
+    EXPECT_FALSE(is_email_shaped(""));
+}
+
 class ImportVaultTest : public ::testing::Test {
 protected:
     std::filesystem::path path_;
@@ -187,7 +203,7 @@ TEST_F(ImportVaultTest, GroupsAccountsUnderOneServicePerSite) {
                "Example,https://example.com/login,first@example.com,pw1,note one\n"
                "Example again,https://EXAMPLE.com/other,second@example.com,pw2,\n"
                "Other,https://other.example,me,pw3,\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 3, .fields = 3}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 3, .fields = 6}));
 
     const std::vector<Entry> services = of_type("service");
     ASSERT_EQ(services.size(), 2u);
@@ -205,10 +221,18 @@ TEST_F(ImportVaultTest, GroupsAccountsUnderOneServicePerSite) {
     EXPECT_EQ(accounts[0].login_url, "https://example.com/login");
 
     const std::vector<Field> fields = vault_->list_fields(accounts[0].id).value();
-    ASSERT_EQ(fields.size(), 1u);
-    EXPECT_EQ(fields[0].label, "Password");
-    EXPECT_EQ(fields[0].field_type, "password");
-    EXPECT_EQ(value_of(fields[0]), "pw1");
+    ASSERT_EQ(fields.size(), 2u);
+    EXPECT_EQ(fields[0].label, "Email");
+    EXPECT_EQ(fields[0].field_type, "text");
+    EXPECT_EQ(value_of(fields[0]), "first@example.com");
+    EXPECT_EQ(fields[1].label, "Password");
+    EXPECT_EQ(fields[1].field_type, "password");
+    EXPECT_EQ(value_of(fields[1]), "pw1");
+
+    const std::vector<Field> plain = vault_->list_fields(accounts[2].id).value();
+    ASSERT_EQ(plain.size(), 2u);
+    EXPECT_EQ(plain[0].label, "ID");
+    EXPECT_EQ(value_of(plain[0]), "me");
 }
 
 TEST_F(ImportVaultTest, StoresTheTotpSecretAsItsOwnField) {
@@ -216,16 +240,16 @@ TEST_F(ImportVaultTest, StoresTheTotpSecretAsItsOwnField) {
         import("Title,URL,Username,Password,Notes,OTPAuth\n"
                "Example,https://example.com,me,pw,,otpauth://totp/Example:me?secret=JBSWY3DPEHPK3PXP&issuer=Example\n"
                "Code only,https://code.example,me,,,JBSWY3DPEHPK3PXP\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 3}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 5}));
     const std::vector<Entry> accounts = of_type("account");
     const std::vector<Field> fields = vault_->list_fields(accounts[0].id).value();
-    ASSERT_EQ(fields.size(), 2u);
-    EXPECT_EQ(fields[1].label, "TOTP");
-    EXPECT_EQ(fields[1].field_type, "totp");
-    EXPECT_EQ(value_of(fields[1]), "JBSWY3DPEHPK3PXP");
+    ASSERT_EQ(fields.size(), 3u);
+    EXPECT_EQ(fields[2].label, "TOTP");
+    EXPECT_EQ(fields[2].field_type, "totp");
+    EXPECT_EQ(value_of(fields[2]), "JBSWY3DPEHPK3PXP");
     const std::vector<Field> code_only = vault_->list_fields(accounts[1].id).value();
-    ASSERT_EQ(code_only.size(), 1u);
-    EXPECT_EQ(code_only[0].field_type, "totp");
+    ASSERT_EQ(code_only.size(), 2u);
+    EXPECT_EQ(code_only[1].field_type, "totp");
 }
 
 TEST_F(ImportVaultTest, SkipsRowsWithNothingToStore) {
@@ -234,14 +258,14 @@ TEST_F(ImportVaultTest, SkipsRowsWithNothingToStore) {
                                          "No secret,https://example.com,me,,\n"
                                          ",,me,pw,\n"
                                          "Kept,https://kept.example,me,pw,\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 1, .skipped_empty = 3}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 2, .skipped_empty = 3}));
 }
 
 TEST_F(ImportVaultTest, ARowWithoutAUrlIsGroupedByItsName) {
     const ImportSummary summary = import("name,url,username,password\n"
                                          "Wi-Fi,,home,pw1\n"
                                          "wi-fi,,guest,pw2\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 2, .fields = 2}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 2, .fields = 4}));
     EXPECT_EQ(of_type("service").front().label, "Wi-Fi");
 }
 
@@ -249,7 +273,7 @@ TEST_F(ImportVaultTest, ImportingTheSameFileAgainAddsNothing) {
     const std::string csv = "name,url,username,password\n"
                             "Example,https://example.com,me,pw\n"
                             "Example,https://example.com,other,pw\n";
-    EXPECT_EQ(import(csv), (ImportSummary{.services = 1, .accounts = 2, .fields = 2}));
+    EXPECT_EQ(import(csv), (ImportSummary{.services = 1, .accounts = 2, .fields = 4}));
     EXPECT_EQ(import(csv), (ImportSummary{.skipped_existing = 2}));
     EXPECT_EQ(vault_->list_entries().value().size(), 3u);
 }
@@ -262,11 +286,20 @@ TEST_F(ImportVaultTest, AddsToAServiceThatIsAlreadyThere) {
     const Entry stored = vault_->add_entry(service).value();
     const ImportSummary summary = import("name,url,username,password\n"
                                          "Example,https://example.com/login,me,pw\n");
-    EXPECT_EQ(summary, (ImportSummary{.accounts = 1, .fields = 1}));
+    EXPECT_EQ(summary, (ImportSummary{.accounts = 1, .fields = 2}));
     const std::vector<Entry> accounts = of_type("account");
     ASSERT_EQ(accounts.size(), 1u);
     EXPECT_EQ(accounts[0].parent_id, stored.id);
     EXPECT_EQ(of_type("service").front().label, "My name for it");
+}
+
+TEST_F(ImportVaultTest, ARowWithoutAUserNameGetsNoIdentifierField) {
+    const ImportSummary summary = import("name,url,username,password\n"
+                                         "Example,https://example.com,,pw\n");
+    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 1}));
+    const std::vector<Field> fields = vault_->list_fields(of_type("account").front().id).value();
+    ASSERT_EQ(fields.size(), 1u);
+    EXPECT_EQ(fields[0].label, "Password");
 }
 
 }

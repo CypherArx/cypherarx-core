@@ -42,6 +42,7 @@ constexpr char kQuote = '"';
 constexpr char kComma = ',';
 constexpr std::string_view kByteOrderMark = "\xEF\xBB\xBF";
 constexpr std::string_view kBlanks = " \t";
+constexpr std::string_view kWhitespace = " \t\r\n";
 constexpr std::string_view kSchemeMark = "://";
 constexpr std::string_view kAuthorityEnd = "/?#";
 constexpr std::string_view kOtpAuthScheme = "otpauth://";
@@ -215,6 +216,20 @@ std::string_view import_site(std::string_view url) {
         rest.remove_prefix(user + 1);
     }
     return rest.substr(0, rest.find(':'));
+}
+
+bool is_email_shaped(std::string_view text) {
+    const auto at = text.find('@');
+    if (at == std::string_view::npos || at == 0 || text.find('@', at + 1) != std::string_view::npos) {
+        return false;
+    }
+    if (text.find_first_of(kWhitespace) != std::string_view::npos) {
+        return false;
+    }
+    const std::string_view domain = text.substr(at + 1);
+    const auto dot = domain.find('.');
+    return dot != std::string_view::npos && dot > 0 && domain.back() != '.' &&
+           domain.find("..") == std::string_view::npos;
 }
 
 std::string_view totp_secret(std::string_view value) {
