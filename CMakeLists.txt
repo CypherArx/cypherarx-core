@@ -77,5 +77,5 @@ if(CYPHERARX_BUILD_TESTS)
   cypherarx_apply_sanitizers(cypherarx_tests)
 
   include(GoogleTest)
-  gtest_discover_tests(cypherarx_tests)
+  gtest_discover_tests(cypherarx_tests DISCOVERY_TIMEOUT 60)
 endif()
