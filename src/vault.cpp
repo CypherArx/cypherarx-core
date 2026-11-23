@@ -1988,4 +1988,80 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
     return summary;
 }
 
+std::expected<void, VaultError> Vault::merge_service(std::int64_t source_id, std::int64_t target_id) {
+    const auto source = get_entry(source_id);
+    if (!source) {
+        return std::unexpected(source.error());
+    }
+    const auto target = get_entry(target_id);
+    if (!target) {
+        return std::unexpected(target.error());
+    }
+    if (source_id == target_id || source->entry_type != kServiceType ||
+        target->entry_type != kServiceType) {
+        return std::unexpected(VaultError::Forbidden);
+    }
+    const auto entries = list_entries();
+    if (!entries) {
+        return std::unexpected(entries.error());
+    }
+    const auto known = urls();
+    if (!known) {
+        return std::unexpected(known.error());
+    }
+    if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    std::optional<VaultError> failure;
+    const auto keep = [&](const std::expected<void, VaultError>& done) {
+        if (!done && !failure) {
+            failure = done.error();
+        }
+    };
+
+    std::string login_url = target->login_url;
+    if (login_url.empty() && !source->login_url.empty()) {
+        Entry updated = *target;
+        updated.login_url = source->login_url;
+        keep(update_entry(updated));
+        login_url = source->login_url;
+    }
+    for (const Entry& e : *entries) {
+        if (failure || e.entry_type != kAccountType || e.parent_id != source_id) {
+            continue;
+        }
+        Entry moved = e;
+        moved.parent_id = target_id;
+        if (moved.login_url.empty() && source->login_url != login_url) {
+            moved.login_url = source->login_url;
+        }
+        keep(update_entry(moved));
+    }
+    std::set<std::string> present;
+    for (const EntryUrl& url : *known) {
+        if (url.entry_id == target_id) {
+            present.insert(lowered(url.value));
+        }
+    }
+    for (const EntryUrl& url : *known) {
+        if (failure || url.entry_id != source_id) {
+            continue;
+        }
+        if (!present.insert(lowered(url.value)).second) {
+            keep(delete_field(url.field_id));
+        } else if (!exec_int64(impl_->db, "UPDATE fields SET entry_id=?,revision=revision+1 WHERE id=?",
+                               target_id, url.field_id)) {
+            failure = VaultError::DatabaseError;
+        }
+    }
+    if (!failure) {
+        keep(delete_entry(source_id));
+    }
+    if (failure || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(failure.value_or(VaultError::DatabaseError));
+    }
+    return {};
+}
+
 } // namespace cypherarx

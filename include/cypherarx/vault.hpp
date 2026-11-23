@@ -149,6 +149,7 @@ public:
     std::expected<std::size_t, VaultError> purge_access_records(std::int64_t now);
 
     std::expected<std::vector<EntryUrl>, VaultError> urls();
+    std::expected<void, VaultError> merge_service(std::int64_t source_id, std::int64_t target_id);
 
     std::expected<ImportSummary, VaultError>
     import_logins(std::span<const ImportedLogin> logins, const ImportOptions& options = {});

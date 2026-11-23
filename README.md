@@ -108,6 +108,14 @@ already there, so importing a file twice adds nothing; a changed password in the
 file is therefore not picked up. Entries already in the vault are never changed. The
 summary counts what was added and what was skipped.
 
+`Vault::merge_service(source, target)` makes two services one, in one transaction, for
+services that turned out to be the same (one made by hand, one imported). The target keeps
+its name and category. The source's accounts move under the target, its URL fields move to
+the target unless the target already has that URL (compared without case), and the source
+is deleted. The target takes the source's login URL when it has none. An account that had
+no login URL of its own, and so used its service's, keeps the URL it used: when the
+target's login URL is a different one, the source's is written to the account.
+
 ## Tech
 
 - **C++23**, libsodium (XChaCha20-Poly1305 / Argon2id), SQLite3

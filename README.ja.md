@@ -107,6 +107,15 @@ Email、そうでなければ ID という名前を付けます。見るのは�
 変わっていても、取り込みません。金庫にすでにあるエントリは、決して変えません。
 結果として、追加した件数と飛ばした件数を返します。
 
+`Vault::merge_service(source, target)` は、2 つの service を 1 つにします（1 つの
+トランザクションで行います）。同じものだと分かった service（手で作ったものと、取り込んだ
+もの）のための操作です。target は名前とカテゴリを保ちます。source の account は target の
+下へ移り、source の URL のフィールドは、target が同じ URL（大文字小文字を区別せずに比べます）を
+すでに持っていなければ target へ移り、source は削除されます。target がログイン URL を
+持っていなければ、source のものを受け継ぎます。自分のログイン URL を持たず service のものを
+使っていた account は、使っていた URL を保ちます。target のログイン URL が別のものなら、
+source のものを account に書きます。
+
 ## 技術
 
 - **C++23**、libsodium（XChaCha20-Poly1305 / Argon2id）、SQLite3
