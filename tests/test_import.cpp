@@ -119,6 +119,16 @@ TEST(ImportSite, TakesTheHostOfAUrl) {
     EXPECT_EQ(import_site(""), "");
 }
 
+TEST(ImportOrigin, KeepsTheSchemeAndTheHostOfAUrl) {
+    EXPECT_EQ(import_origin("https://example.com/login?x=1"), "https://example.com");
+    EXPECT_EQ(import_origin("http://example.com:8080/a"), "http://example.com:8080");
+    EXPECT_EQ(import_origin("https://user:pw@example.com/a"), "https://example.com");
+    EXPECT_EQ(import_origin("android://hash==@com.example.app/"), "android://com.example.app");
+    EXPECT_EQ(import_origin("example.com/path"), "example.com");
+    EXPECT_EQ(import_origin("  https://example.com#top "), "https://example.com");
+    EXPECT_EQ(import_origin(""), "");
+}
+
 TEST(TotpSecret, TakesTheSecretOfAnOtpAuthUrl) {
     EXPECT_EQ(totp_secret("JBSWY3DPEHPK3PXP"), "JBSWY3DPEHPK3PXP");
     EXPECT_EQ(totp_secret(" JBSWY3DPEHPK3PXP "), "JBSWY3DPEHPK3PXP");
@@ -203,12 +213,18 @@ TEST_F(ImportVaultTest, GroupsAccountsUnderOneServicePerSite) {
                "Example,https://example.com/login,first@example.com,pw1,note one\n"
                "Example again,https://EXAMPLE.com/other,second@example.com,pw2,\n"
                "Other,https://other.example,me,pw3,\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 3, .fields = 6}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 3, .fields = 8}));
 
     const std::vector<Entry> services = of_type("service");
     ASSERT_EQ(services.size(), 2u);
     EXPECT_EQ(services[0].label, "Example");
-    EXPECT_EQ(services[0].url, "https://example.com/login");
+    EXPECT_TRUE(services[0].url.empty());
+    const std::vector<EntryUrl> urls = vault_->urls().value();
+    ASSERT_EQ(urls.size(), 2u);
+    EXPECT_EQ(urls[0].entry_id, services[0].id);
+    EXPECT_EQ(urls[0].value, "https://example.com");
+    EXPECT_EQ(urls[1].entry_id, services[1].id);
+    EXPECT_EQ(urls[1].value, "https://other.example");
     EXPECT_EQ(services[1].label, "Other");
 
     const std::vector<Entry> accounts = of_type("account");
@@ -218,7 +234,9 @@ TEST_F(ImportVaultTest, GroupsAccountsUnderOneServicePerSite) {
     EXPECT_EQ(accounts[2].parent_id, services[1].id);
     EXPECT_EQ(accounts[0].label, "first@example.com");
     EXPECT_EQ(accounts[0].notes, "note one");
-    EXPECT_EQ(accounts[0].login_url, "https://example.com/login");
+    EXPECT_EQ(services[0].login_url, "https://example.com/login");
+    EXPECT_TRUE(accounts[0].login_url.empty());
+    EXPECT_EQ(accounts[1].login_url, "https://EXAMPLE.com/other");
 
     const std::vector<Field> fields = vault_->list_fields(accounts[0].id).value();
     ASSERT_EQ(fields.size(), 2u);
@@ -240,7 +258,7 @@ TEST_F(ImportVaultTest, StoresTheTotpSecretAsItsOwnField) {
         import("Title,URL,Username,Password,Notes,OTPAuth\n"
                "Example,https://example.com,me,pw,,otpauth://totp/Example:me?secret=JBSWY3DPEHPK3PXP&issuer=Example\n"
                "Code only,https://code.example,me,,,JBSWY3DPEHPK3PXP\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 5}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 7}));
     const std::vector<Entry> accounts = of_type("account");
     const std::vector<Field> fields = vault_->list_fields(accounts[0].id).value();
     ASSERT_EQ(fields.size(), 3u);
@@ -258,7 +276,7 @@ TEST_F(ImportVaultTest, SkipsRowsWithNothingToStore) {
                                          "No secret,https://example.com,me,,\n"
                                          ",,me,pw,\n"
                                          "Kept,https://kept.example,me,pw,\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 2, .skipped_empty = 3}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 3, .skipped_empty = 3}));
 }
 
 TEST_F(ImportVaultTest, ARowWithoutAUrlIsGroupedByItsName) {
@@ -273,7 +291,7 @@ TEST_F(ImportVaultTest, ImportingTheSameFileAgainAddsNothing) {
     const std::string csv = "name,url,username,password\n"
                             "Example,https://example.com,me,pw\n"
                             "Example,https://example.com,other,pw\n";
-    EXPECT_EQ(import(csv), (ImportSummary{.services = 1, .accounts = 2, .fields = 4}));
+    EXPECT_EQ(import(csv), (ImportSummary{.services = 1, .accounts = 2, .fields = 5}));
     EXPECT_EQ(import(csv), (ImportSummary{.skipped_existing = 2}));
     EXPECT_EQ(vault_->list_entries().value().size(), 3u);
 }
@@ -306,7 +324,7 @@ TEST_F(ImportVaultTest, GivesEveryImportedAccountTheChosenPersona) {
     options.persona_id = stored.id;
     const auto summary = vault_->import_logins(*p.logins, options);
     ASSERT_TRUE(summary.has_value());
-    EXPECT_EQ(*summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 4}));
+    EXPECT_EQ(*summary, (ImportSummary{.services = 2, .accounts = 2, .fields = 6}));
     for (const Entry& account : of_type("account")) {
         EXPECT_EQ(account.persona_id, stored.id);
     }
@@ -335,10 +353,81 @@ TEST_F(ImportVaultTest, APersonaThatIsNotAPersonaIsRefusedAndNothingIsAdded) {
     EXPECT_EQ(vault_->list_entries().value().size(), 1u);
 }
 
+TEST_F(ImportVaultTest, AServiceNamedLikeItsSiteIsLeftUnnamed) {
+    import("name,url,username,password\n"
+           "X.com,https://x.com/,me,pw\n"
+           "Example,https://example.com/,me,pw\n"
+           ",https://nameless.example/,me,pw\n");
+    const std::vector<Entry> services = of_type("service");
+    ASSERT_EQ(services.size(), 3u);
+    EXPECT_TRUE(services[0].label.empty());
+    EXPECT_EQ(services[1].label, "Example");
+    EXPECT_TRUE(services[2].label.empty());
+    const std::vector<Field> fields = vault_->list_fields(services[0].id).value();
+    ASSERT_EQ(fields.size(), 1u);
+    EXPECT_EQ(fields[0].label, "URL");
+    EXPECT_EQ(fields[0].field_type, "url");
+    EXPECT_EQ(value_of(fields[0]), "https://x.com");
+}
+
+TEST_F(ImportVaultTest, FindsAServiceByAnyOfItsUrls) {
+    Entry service;
+    service.entry_type = "service";
+    service.label = "X";
+    const Entry stored = vault_->add_entry(service).value();
+    for (const std::string_view url : {"twitter.com", "https://X.com/home"}) {
+        ASSERT_TRUE(vault_
+                        ->add_field(stored.id, "URL", "url",
+                                    {reinterpret_cast<const std::uint8_t*>(url.data()), url.size()},
+                                    "")
+                        .has_value());
+    }
+    const ImportSummary summary = import("name,url,username,password\n"
+                                         "x.com,https://x.com/i/flow/login,me,pw\n"
+                                         "Twitter,https://twitter.com/login,old,pw\n");
+    EXPECT_EQ(summary, (ImportSummary{.accounts = 2, .fields = 4}));
+    ASSERT_EQ(of_type("service").size(), 1u);
+    for (const Entry& account : of_type("account")) {
+        EXPECT_EQ(account.parent_id, stored.id);
+    }
+}
+
+TEST_F(ImportVaultTest, UrlsOfDeletedFieldsAndEntriesAreNotListed) {
+    import("name,url,username,password\n"
+           "A,https://a.example,me,pw\n"
+           "B,https://b.example,me,pw\n");
+    const std::vector<Entry> services = of_type("service");
+    ASSERT_EQ(vault_->urls().value().size(), 2u);
+    ASSERT_TRUE(vault_->delete_entry(services[0].id).has_value());
+    const std::vector<EntryUrl> left = vault_->urls().value();
+    ASSERT_EQ(left.size(), 1u);
+    EXPECT_EQ(left[0].value, "https://b.example");
+    ASSERT_TRUE(vault_->delete_field(left[0].field_id).has_value());
+    EXPECT_TRUE(vault_->urls().value().empty());
+}
+
+TEST_F(ImportVaultTest, AnAccountKeepsItsOwnLoginUrlOnlyWhenItDiffersFromTheServices) {
+    Entry service;
+    service.entry_type = "service";
+    service.label = "Example";
+    service.url = "https://example.com";
+    service.login_url = "https://example.com/login";
+    const Entry stored = vault_->add_entry(service).value();
+    import("name,url,username,password\n"
+           "Example,https://example.com/login,same,pw\n"
+           "Example,https://example.com/sso/start,other,pw\n");
+    const std::vector<Entry> accounts = of_type("account");
+    ASSERT_EQ(accounts.size(), 2u);
+    EXPECT_EQ(accounts[0].parent_id, stored.id);
+    EXPECT_TRUE(accounts[0].login_url.empty());
+    EXPECT_EQ(accounts[1].login_url, "https://example.com/sso/start");
+    EXPECT_EQ(vault_->get_entry(stored.id).value().login_url, "https://example.com/login");
+}
+
 TEST_F(ImportVaultTest, ARowWithoutAUserNameGetsNoIdentifierField) {
     const ImportSummary summary = import("name,url,username,password\n"
                                          "Example,https://example.com,,pw\n");
-    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 1}));
+    EXPECT_EQ(summary, (ImportSummary{.services = 1, .accounts = 1, .fields = 2}));
     const std::vector<Field> fields = vault_->list_fields(of_type("account").front().id).value();
     ASSERT_EQ(fields.size(), 1u);
     EXPECT_EQ(fields[0].label, "Password");

@@ -77,20 +77,35 @@ mark are handled. **It has been tested with headers shaped like those exports,
 not with files exported by the products themselves.** KeePass XML
 and 1Password 1PUX are not read.
 
-`import_logins` stores the rows in one transaction. Rows are grouped by site, the host of
-the URL compared without case, or the name when there is no URL: one service entry per
-site, reusing a service that is already in the vault, and one account entry per row under
-it, named by the user name, with the note as its notes. Its fields are the user name
-itself (labelled as an email address when it has the shape of one, as an ID otherwise;
-the shape is all that is checked, and the value is kept either way), the password and the
-TOTP secret (taken out of an `otpauth://` URL). The user name is a field as well as the
-account's name because an account has any number of identifiers of equal standing (an
-email address, a phone number, a handle), an export carries one of them, and a field is
-what can be copied and added to. Every imported account is
-given the persona of `ImportOptions::persona_id` when one is set (it must be a persona
-entry, or nothing is imported). A row with nothing to store is
-skipped, and so is a row whose site and user name are already there, so importing a file
-twice adds nothing; a changed password in the second file is therefore not picked up. The
+`import_logins` stores the rows in one transaction, as services and accounts.
+
+A service has a name, any number of URLs and a login URL, and these are three things. The
+name is for display and may be empty. The URLs are fields of the type `url` on the service
+(`kUrlFieldType`, read back with `Vault::urls`); a service with no URL is possible, for
+something that has no site or an app whose site is unknown. The login URL is the service's
+own `login_url`, because the place to log in belongs to the service, not to each account.
+
+Rows are grouped by site: the host of the row's URL, compared without case, or the name
+when there is no URL. A row goes to the service already in the vault that has that host in
+any of its URL fields or in its `url`, or that has that name when it has no URL; otherwise a
+service is made, with the scheme and the host of the row's URL as its URL field, the row's
+URL as its login URL, and the row's name as its name unless the name is just the host.
+Because the host is compared as written, `www.example.com` and `example.com` are still two
+sites; telling which hosts are one registered domain needs the public suffix list.
+
+Each row becomes one account under its service, named by the user name, with the note as
+its notes and, when `ImportOptions::persona_id` is set, that persona (it must be a persona
+entry, or nothing is imported). The account keeps a login URL of its own only when the
+row's URL differs from its service's. Its fields are the user name itself (labelled as an
+email address when it has the shape of one, as an ID otherwise; the shape is all that is
+checked, and the value is kept either way), the password and the TOTP secret (taken out of
+an `otpauth://` URL). The user name is a field as well as the account's name because an
+account has any number of identifiers of equal standing (an email address, a phone number,
+a handle), an export carries one of them, and a field is what can be copied and added to.
+
+A row with nothing to store is skipped, and so is a row whose site and user name are
+already there, so importing a file twice adds nothing; a changed password in the second
+file is therefore not picked up. Entries already in the vault are never changed. The
 summary counts what was added and what was skipped.
 
 ## Tech

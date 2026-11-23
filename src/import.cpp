@@ -232,6 +232,25 @@ bool is_email_shaped(std::string_view text) {
            domain.find("..") == std::string_view::npos;
 }
 
+std::string import_origin(std::string_view url) {
+    const std::string_view text = trimmed(url);
+    const auto scheme = text.find(kSchemeMark);
+    if (scheme == std::string_view::npos) {
+        return std::string(import_site(text));
+    }
+    std::string_view authority = text.substr(scheme + kSchemeMark.size());
+    authority = authority.substr(0, authority.find_first_of(kAuthorityEnd));
+    if (const auto user = authority.rfind('@'); user != std::string_view::npos) {
+        authority.remove_prefix(user + 1);
+    }
+    if (authority.empty()) {
+        return {};
+    }
+    std::string out(text.substr(0, scheme + kSchemeMark.size()));
+    out += authority;
+    return out;
+}
+
 std::string_view totp_secret(std::string_view value) {
     const std::string_view text = trimmed(value);
     if (text.size() < kOtpAuthScheme.size() ||

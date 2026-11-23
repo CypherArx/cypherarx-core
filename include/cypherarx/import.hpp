@@ -29,6 +29,7 @@ enum class ImportError {
 std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_csv(std::span<char> data);
 
 std::string_view import_site(std::string_view url);
+std::string import_origin(std::string_view url);
 std::string_view totp_secret(std::string_view value);
 bool is_email_shaped(std::string_view text);
 
@@ -40,6 +41,7 @@ struct ImportOptions {
     std::string email_label = "Email";
     std::string id_label = "ID";
     std::string identifier_type = "text";
+    std::string url_label = "URL";
     std::optional<std::int64_t> persona_id;
 };
 

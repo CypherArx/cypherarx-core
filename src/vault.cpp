@@ -1799,6 +1799,35 @@ std::expected<void, VaultError> Vault::rotate_key(std::span<const std::uint8_t> 
     return {};
 }
 
+std::expected<std::vector<EntryUrl>, VaultError> Vault::urls() {
+    if (!is_unlocked()) {
+        return std::unexpected(VaultError::NotUnlocked);
+    }
+    static const char* sql =
+        "SELECT f.id,f.entry_id,f.value_enc,f.uuid FROM fields f JOIN entries e ON e.id=f.entry_id "
+        "WHERE f.field_type=? AND f.deleted_at IS NULL AND e.deleted_at IS NULL ORDER BY f.id";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    sqlite3_bind_text(st, 1, kUrlFieldType.data(), static_cast<int>(kUrlFieldType.size()),
+                      SQLITE_TRANSIENT);
+    std::vector<EntryUrl> out;
+    bool corrupt = false;
+    while (!corrupt && sqlite3_step(st) == SQLITE_ROW) {
+        auto value = dec_text(impl_->dek.bytes(), blob_col(st, 2), text_col(st, 3), "value");
+        corrupt = !value;
+        if (value) {
+            out.push_back({sqlite3_column_int64(st, 1), sqlite3_column_int64(st, 0), std::move(*value)});
+        }
+    }
+    sqlite3_finalize(st);
+    if (corrupt) {
+        return std::unexpected(VaultError::Corrupt);
+    }
+    return out;
+}
+
 namespace {
 
 constexpr const char* kServiceType = "service";
@@ -1832,19 +1861,35 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
     if (!existing) {
         return std::unexpected(existing.error());
     }
+    const auto known = urls();
+    if (!known) {
+        return std::unexpected(known.error());
+    }
     std::map<std::string, std::int64_t> services;
+    std::set<std::int64_t> service_ids;
+    std::map<std::int64_t, std::string> login_urls;
     std::set<std::pair<std::int64_t, std::string>> accounts;
     bool persona_found = !options.persona_id.has_value();
     for (const Entry& e : *existing) {
         persona_found = persona_found || (e.id == *options.persona_id && e.entry_type == kPersonaType);
         if (e.entry_type == kServiceType) {
-            services.emplace(service_key(e.url, e.label), e.id);
+            service_ids.insert(e.id);
+            login_urls.emplace(e.id, e.login_url);
+            if (const std::string key = service_key(e.url, e.label); !key.empty()) {
+                services.emplace(key, e.id);
+            }
         } else if (e.entry_type == kAccountType && e.parent_id) {
             accounts.emplace(*e.parent_id, e.label);
         }
     }
     if (!persona_found) {
         return std::unexpected(VaultError::NotFound);
+    }
+    for (const EntryUrl& url : *known) {
+        const std::string key = service_key(url.value, url.value);
+        if (service_ids.contains(url.entry_id) && !key.empty()) {
+            services.emplace(key, url.entry_id);
+        }
     }
     if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
         return std::unexpected(VaultError::DatabaseError);
@@ -1864,16 +1909,30 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
             continue;
         }
         if (service == services.end()) {
+            const std::string_view site = import_site(login.url);
+            const std::string origin = import_origin(login.url);
             Entry e;
             e.entry_type = kServiceType;
-            e.label = std::string(login.name.empty() ? import_site(login.url) : login.name);
-            e.url = std::string(login.url);
+            if (lowered(login.name) != lowered(site)) {
+                e.label = std::string(login.name);
+            }
+            e.login_url = std::string(login.url);
             const auto added = add_entry(e);
             if (!added) {
                 failure = added.error();
                 break;
             }
+            if (!site.empty()) {
+                const auto url = add_field(added->id, options.url_label,
+                                               std::string(kUrlFieldType), as_bytes(origin), {});
+                if (!url) {
+                    failure = url.error();
+                    break;
+                }
+                ++summary.fields;
+            }
             service = services.emplace(key, added->id).first;
+            login_urls.emplace(added->id, e.login_url);
             ++summary.services;
         }
         Entry account;
@@ -1881,7 +1940,9 @@ Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions&
         account.parent_id = service->second;
         account.persona_id = options.persona_id;
         account.label = std::string(login.username);
-        account.login_url = std::string(login.url);
+        if (login.url != login_urls[service->second]) {
+            account.login_url = std::string(login.url);
+        }
         account.notes = std::string(login.notes);
         const auto added = add_entry(account);
         if (!added) {
