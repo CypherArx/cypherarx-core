@@ -12,6 +12,7 @@
 
 #include "cypherarx/access_log.hpp"
 #include "cypherarx/entry.hpp"
+#include "cypherarx/import.hpp"
 #include "cypherarx/kdf.hpp"
 #include "cypherarx/secret.hpp"
 #include "cypherarx/settings.hpp"
@@ -146,6 +147,9 @@ public:
     record_access(std::int64_t entry_id, AccessAction action, std::int64_t now);
     std::expected<std::vector<AccessRecord>, VaultError> access_records(std::int64_t now);
     std::expected<std::size_t, VaultError> purge_access_records(std::int64_t now);
+
+    std::expected<ImportSummary, VaultError>
+    import_logins(std::span<const ImportedLogin> logins, const ImportOptions& options = {});
 
 private:
     Vault();

@@ -26,6 +26,7 @@ add_library(cypherarx_core
   src/crypto/kdf.cpp
   src/crypto/vault_key.cpp
   src/crypto/totp.cpp
+  src/import.cpp
   src/passgen.cpp
   src/vault.cpp
 )
@@ -67,6 +68,7 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_settings.cpp
     tests/test_access_log.cpp
     tests/test_rotation.cpp
+    tests/test_import.cpp
     tests/test_passgen.cpp
     tests/test_totp.cpp
   )

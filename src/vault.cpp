@@ -2,6 +2,8 @@
 
 #include <charconv>
 #include <chrono>
+#include <map>
+#include <set>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -1795,6 +1797,116 @@ std::expected<void, VaultError> Vault::rotate_key(std::span<const std::uint8_t> 
         return std::unexpected(VaultError::ScrubFailed);
     }
     return {};
+}
+
+namespace {
+
+constexpr const char* kServiceType = "service";
+constexpr const char* kAccountType = "account";
+
+std::string lowered(std::string_view text) {
+    std::string out(text);
+    for (char& c : out) {
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
+std::string service_key(std::string_view url, std::string_view name) {
+    const std::string_view site = import_site(url);
+    return lowered(site.empty() ? name : site);
+}
+
+std::span<const std::uint8_t> as_bytes(std::string_view text) {
+    return {reinterpret_cast<const std::uint8_t*>(text.data()), text.size()};
+}
+
+} // namespace
+
+std::expected<ImportSummary, VaultError>
+Vault::import_logins(std::span<const ImportedLogin> logins, const ImportOptions& options) {
+    const auto existing = list_entries();
+    if (!existing) {
+        return std::unexpected(existing.error());
+    }
+    std::map<std::string, std::int64_t> services;
+    std::set<std::pair<std::int64_t, std::string>> accounts;
+    for (const Entry& e : *existing) {
+        if (e.entry_type == kServiceType) {
+            services.emplace(service_key(e.url, e.label), e.id);
+        } else if (e.entry_type == kAccountType && e.parent_id) {
+            accounts.emplace(*e.parent_id, e.label);
+        }
+    }
+    if (!exec(impl_->db, "BEGIN IMMEDIATE")) {
+        return std::unexpected(VaultError::DatabaseError);
+    }
+    ImportSummary summary;
+    std::optional<VaultError> failure;
+    for (const ImportedLogin& login : logins) {
+        const std::string_view secret = totp_secret(login.totp);
+        const std::string key = service_key(login.url, login.name);
+        if (key.empty() || (login.password.empty() && secret.empty())) {
+            ++summary.skipped_empty;
+            continue;
+        }
+        auto service = services.find(key);
+        if (service != services.end() && accounts.contains({service->second, std::string(login.username)})) {
+            ++summary.skipped_existing;
+            continue;
+        }
+        if (service == services.end()) {
+            Entry e;
+            e.entry_type = kServiceType;
+            e.label = std::string(login.name.empty() ? import_site(login.url) : login.name);
+            e.url = std::string(login.url);
+            const auto added = add_entry(e);
+            if (!added) {
+                failure = added.error();
+                break;
+            }
+            service = services.emplace(key, added->id).first;
+            ++summary.services;
+        }
+        Entry account;
+        account.entry_type = kAccountType;
+        account.parent_id = service->second;
+        account.label = std::string(login.username);
+        account.login_url = std::string(login.url);
+        account.notes = std::string(login.notes);
+        const auto added = add_entry(account);
+        if (!added) {
+            failure = added.error();
+            break;
+        }
+        accounts.emplace(service->second, account.label);
+        ++summary.accounts;
+        if (!login.password.empty()) {
+            const auto field = add_field(added->id, options.password_label, options.password_type,
+                                         as_bytes(login.password), {});
+            if (!field) {
+                failure = field.error();
+                break;
+            }
+            ++summary.fields;
+        }
+        if (!secret.empty()) {
+            const auto field =
+                add_field(added->id, options.totp_label, options.totp_type, as_bytes(secret), {});
+            if (!field) {
+                failure = field.error();
+                break;
+            }
+            ++summary.fields;
+        }
+    }
+    if (failure || !exec(impl_->db, "COMMIT")) {
+        exec(impl_->db, "ROLLBACK");
+        return std::unexpected(failure.value_or(VaultError::DatabaseError));
+    }
+    return summary;
 }
 
 } // namespace cypherarx

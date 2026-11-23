@@ -12,7 +12,7 @@ free-form fields, multi-persona accounts) that mainstream managers can't model.
 ## Scope
 
 This is the **UI-free** core: cryptography, the KEK/DEK key hierarchy, encrypted
-SQLite storage, entry/field logic, password generation, TOTP, and import. It exposes
+SQLite storage, entry/field logic, password generation, TOTP, and CSV import. It exposes
 a **library API only** — there is **no CLI** (by design) and **no UI** (the Dear ImGui
 GUI lives in a separate repository, `cypherarx-gui`).
 
@@ -63,6 +63,28 @@ a leaked DEK. It does not help against a leaked master password by itself, since
 DEK is wrapped under the same password, and changing the master password does not rotate
 the DEK: whoever has the old password and an old copy of the file can still read a newer
 copy unless the key is rotated as well.
+
+Import (`cypherarx/import.hpp`, `Vault::import_logins`) reads the CSV files that browsers
+and password managers export. `parse_logins_csv` works in place on the caller's buffer and
+returns views into it, so the caller can keep the file in guarded memory and wipe it once.
+It does not know each product's format: it finds the columns by their header names, in any
+order and case (`name`/`title`, `url`/`uri`/`login_uri`/`website`,
+`username`/`login_username`/`login`, `email` when there is no user name,
+`password`/`login_password`, `totp`/`login_totp`/`otpauth`/`otpsecret`/`otpurl`,
+`note`/`notes`/`extra`/`comments`), and refuses a file with neither a password nor a TOTP
+column. Quoted fields, doubled quotes, line breaks inside a field, CRLF and a byte-order
+mark are handled. **It has been tested with headers shaped like those exports,
+not with files exported by the products themselves.** KeePass XML
+and 1Password 1PUX are not read.
+
+`import_logins` stores the rows in one transaction. Rows are grouped by site, the host of
+the URL compared without case, or the name when there is no URL: one service entry per
+site, reusing a service that is already in the vault, and one account entry per row under
+it, named by the user name, with the password and the TOTP secret (taken out of an
+`otpauth://` URL) as its fields and the note as its notes. A row with nothing to store is
+skipped, and so is a row whose site and user name are already there, so importing a file
+twice adds nothing; a changed password in the second file is therefore not picked up. The
+summary counts what was added and what was skipped.
 
 ## Tech
 
