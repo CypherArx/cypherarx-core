@@ -241,6 +241,9 @@ tests/               GoogleTest 単体テスト
 
 ## 設計
 
+暗号の設計（鍵、何を暗号化するか、ファイルから分かること、守らないもの）は
+[docs/crypto.ja.md](docs/crypto.ja.md) にあります。
+
 設計の正典は組織リポジトリの `claude-handover/cypherarx-design-final.md` にあります。
 
 ## ライセンス

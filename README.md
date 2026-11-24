@@ -245,6 +245,9 @@ tests/               GoogleTest unit tests
 
 ## Design
 
+The cryptographic design (keys, what is encrypted, what the file shows, what is not
+protected) is in [docs/crypto.md](docs/crypto.md).
+
 The canonical design document is in the org repository:
 `claude-handover/cypherarx-design-final.md`.
 
