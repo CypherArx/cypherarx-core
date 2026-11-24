@@ -133,7 +133,7 @@ KeePass や KeePassXC が実際に書き出したファイルでは行ってい�
 できます。無圧縮と deflate の中身を読み（deflate は miniz。作業用の状態は終わったら消去
 します）、チェックサムを確かめます。ZIP64、暗号化された中身、ほかの圧縮方式は
 `Unsupported` で、`export.data` の無いアーカイブも同じです。続いて `parse_logins_onepux`
-が、JSON をバッファの中で読みます。すべてのアカウントのすべての保管庫のすべての項目が、
+が、JSON をバッファの中で読みます。すべてのアカウントのすべての金庫（1Password の vault）のすべての項目が、
 1 件のログインになります。名前は `overview.title`、URL は `overview.url`（無ければ
 `overview.urls` の最初のもの）、ユーザー名とパスワードは `details.loginFields` のうち
 `designation` が `username` と `password` のもの、そういうものが無いときのパスワードは
