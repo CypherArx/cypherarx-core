@@ -7,7 +7,7 @@
 オープンソース・完全ローカル・ネイティブのパスワードマネージャーです。
 
 > **状態: プレアルファ、一般利用不可。** 開発中はリポジトリを非公開にしています。
-> オープンソースライセンスは最初の公開時に決めます。
+> ライセンスは Apache License 2.0（[LICENSE](LICENSE)）です。
 
 ## 範囲
 
@@ -234,3 +234,8 @@ tests/               GoogleTest 単体テスト
 ## 設計
 
 設計の正典は組織リポジトリの `claude-handover/cypherarx-design-final.md` にあります。
+
+## ライセンス
+
+cypherarx-core のライセンスは [Apache License 2.0](LICENSE) です。[NOTICE](NOTICE) も参照してください。
+ビルドに使うライブラリのライセンスの一覧は、まだありません。

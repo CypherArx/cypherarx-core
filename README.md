@@ -7,7 +7,7 @@ native password manager for *complex* credential data (hierarchical entries,
 free-form fields, multi-persona accounts) that mainstream managers can't model.
 
 > **Status: pre-alpha, not for public use.** The repository is kept private during
-> development; the open-source license will be chosen at the first public release.
+> development. The license is the Apache License 2.0 ([LICENSE](LICENSE)).
 
 ## Scope
 
@@ -237,3 +237,8 @@ tests/               GoogleTest unit tests
 
 The canonical design document is in the org repository:
 `claude-handover/cypherarx-design-final.md`.
+
+## License
+
+cypherarx-core is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
+The licenses of the libraries it is built with are not listed yet.
