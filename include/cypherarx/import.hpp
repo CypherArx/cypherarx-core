@@ -34,6 +34,10 @@ ImportFormat import_format(std::span<const char> data);
 
 std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_csv(std::span<char> data);
 std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_keepass_xml(std::span<char> data);
+std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_onepux(std::span<char> data);
+
+std::expected<std::size_t, ImportError> onepux_data_size(std::span<const char> archive);
+std::expected<void, ImportError> onepux_extract_data(std::span<const char> archive, std::span<char> out);
 
 std::string_view import_site(std::string_view url);
 std::string import_origin(std::string_view url);

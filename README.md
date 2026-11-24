@@ -110,7 +110,7 @@ order and case (`name`/`title`, `url`/`uri`/`login_uri`/`website`,
 `note`/`notes`/`extra`/`comments`), and refuses a file with neither a password nor a TOTP
 column. Quoted fields, doubled quotes, line breaks inside a field, CRLF and a byte-order
 mark are handled. **It has been tested with headers shaped like those exports,
-not with files exported by the products themselves.** 1Password 1PUX is not read.
+not with files exported by the products themselves.**
 
 `parse_logins_keepass_xml` reads the unencrypted XML that KeePass 2 and KeePassXC export
 (`KeePassFile`), in place in the same way. Each `Entry` in any group gives one login from
@@ -127,6 +127,28 @@ is `Unsupported`, markup that does not nest or an unknown entity is `Malformed`,
 `Value` marked `Protected="True"` is `Protected`: that is the inner XML of a database file,
 whose values are still encrypted, not an export. **It has been tested with XML written by
 hand after the format, not with files exported by KeePass or KeePassXC.**
+
+A 1Password 1PUX file is a ZIP archive whose member `export.data` is JSON, so it is read in
+two steps. `onepux_data_size` finds that member and returns its size once unpacked, and
+`onepux_extract_data` unpacks it into a buffer of exactly that size, which the caller
+provides: the caller decides how large a size it accepts, and can make the buffer guarded
+memory. Stored and deflated members are read (deflate through miniz, whose working state is
+wiped afterwards), and the checksum is verified; ZIP64, encrypted members and other methods
+are `Unsupported`, and so is an archive without `export.data`. `parse_logins_onepux` then
+reads the JSON in place. Every item of every vault of every account gives one login: the
+name from `overview.title`, the URL from `overview.url` or else the first of
+`overview.urls`, the user name and the password from the entries of `details.loginFields`
+whose `designation` is `username` and `password`, the password from `details.password` when
+there is no such entry, the notes from `details.notesPlain`, and the one-time password
+from the first section field whose `value` has a `totp` member. The category and the state
+(active or archived) are not looked at, so an item that is not a login comes through with
+no password and is skipped by `import_logins` unless it has something to store. Other
+section fields, tags, the password history and the files in the archive are not read. JSON
+that is not well formed is `Malformed`, and a document without `accounts` is
+`Unsupported`. **It has been tested with JSON written after 1Password's description of the
+format, not with a file exported by 1Password. That description does not show how a
+one-time password or a Password item is stored; `value.totp` and `details.password` are
+what other importers read, and are unverified here.**
 
 `import_format` tells the three formats apart from the first bytes: `PK` is a 1PUX archive,
 a `<` after an optional byte-order mark and white space is XML, anything else is CSV.

@@ -19,6 +19,7 @@ endif()
 
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(miniz CONFIG REQUIRED)
 
 set(CYPHERARX_ZXCVBN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external/zxcvbn-c)
 set(CYPHERARX_ZXCVBN_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/zxcvbn)
@@ -72,6 +73,7 @@ add_library(cypherarx_core
   src/erase.cpp
   src/import.cpp
   src/import_keepass.cpp
+  src/import_onepux.cpp
   src/passgen.cpp
   src/strength.cpp
   src/vault.cpp
@@ -79,7 +81,7 @@ add_library(cypherarx_core
 target_include_directories(cypherarx_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(cypherarx_core
   PUBLIC unofficial-sodium::sodium
-  PRIVATE unofficial::sqlite3::sqlite3 cypherarx_zxcvbn
+  PRIVATE unofficial::sqlite3::sqlite3 cypherarx_zxcvbn miniz::miniz
 )
 target_compile_features(cypherarx_core PUBLIC cxx_std_23)
 
@@ -117,12 +119,13 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_erase.cpp
     tests/test_import.cpp
     tests/test_import_keepass.cpp
+    tests/test_import_onepux.cpp
     tests/test_merge.cpp
     tests/test_passgen.cpp
     tests/test_strength.cpp
     tests/test_totp.cpp
   )
-  target_link_libraries(cypherarx_tests PRIVATE cypherarx_core unofficial::sqlite3::sqlite3
+  target_link_libraries(cypherarx_tests PRIVATE cypherarx_core unofficial::sqlite3::sqlite3 miniz::miniz
                         GTest::gtest GTest::gtest_main)
   cypherarx_apply_sanitizers(cypherarx_tests)
 
