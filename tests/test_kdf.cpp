@@ -85,6 +85,58 @@ TEST_F(KdfTest, ParamsParseRejectsGarbage) {
     EXPECT_FALSE(KdfParams::from_string("argon2id").has_value());
 }
 
+TEST_F(KdfTest, BenchmarkGivesThreeUsableChoicesInOrder) {
+    KdfBenchmarkOptions options;
+    options.budget_seconds = 0.2;
+    options.min_mem = std::size_t{8} * 1024 * 1024;
+    options.max_mem = std::size_t{64} * 1024 * 1024;
+    const auto choices = benchmark_kdf(options);
+    ASSERT_TRUE(choices.has_value());
+    for (std::size_t i = 0; i < choices->size(); ++i) {
+        const KdfChoice& c = (*choices)[i];
+        EXPECT_EQ(c.params.ops_limit, options.ops_limit);
+        EXPECT_GE(c.params.mem_limit, options.min_mem);
+        EXPECT_LE(c.params.mem_limit, options.max_mem);
+        EXPECT_GT(c.seconds, 0.0);
+        if (i > 0) {
+            EXPECT_GE(c.params.mem_limit, (*choices)[i - 1].params.mem_limit);
+        }
+        std::vector<std::uint8_t> salt(kdf::salt_bytes, 7);
+        const std::vector<std::uint8_t> pw{'p', 'w'};
+        EXPECT_TRUE(derive_kek(pw, salt, c.params).has_value());
+    }
+}
+
+TEST_F(KdfTest, BenchmarkStaysAtTheMinimumWhenTheBudgetIsTiny) {
+    KdfBenchmarkOptions options;
+    options.budget_seconds = 0.000001;
+    options.min_mem = std::size_t{8} * 1024 * 1024;
+    options.max_mem = std::size_t{64} * 1024 * 1024;
+    const auto choices = benchmark_kdf(options);
+    ASSERT_TRUE(choices.has_value());
+    for (const KdfChoice& c : *choices) {
+        EXPECT_EQ(c.params.mem_limit, options.min_mem);
+    }
+}
+
+TEST_F(KdfTest, BenchmarkStopsAtTheMaximumWhenTheBudgetIsHuge) {
+    KdfBenchmarkOptions options;
+    options.budget_seconds = 100000.0;
+    options.min_mem = std::size_t{8} * 1024 * 1024;
+    options.max_mem = std::size_t{16} * 1024 * 1024;
+    const auto choices = benchmark_kdf(options);
+    ASSERT_TRUE(choices.has_value());
+    for (const KdfChoice& c : *choices) {
+        EXPECT_EQ(c.params.mem_limit, options.max_mem);
+    }
+}
+
+TEST_F(KdfTest, BenchmarkRejectsImpossibleOptions) {
+    KdfBenchmarkOptions options;
+    options.max_mem = options.min_mem / 2;
+    EXPECT_EQ(benchmark_kdf(options).error(), KdfError::InvalidParams);
+}
+
 TEST_F(KdfTest, PresetsAreOrdered) {
     EXPECT_LT(KdfParams::interactive().ops_limit, KdfParams::moderate().ops_limit);
     EXPECT_LT(KdfParams::moderate().ops_limit, KdfParams::sensitive().ops_limit);

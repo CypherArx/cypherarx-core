@@ -1,5 +1,7 @@
 #include "cypherarx/kdf.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <optional>
 
 #include <sodium.h>
@@ -81,6 +83,69 @@ derive_kek(std::span<const std::uint8_t> password,
         return std::unexpected(KdfError::DerivationFailed);
     }
     return kek;
+}
+
+namespace {
+
+constexpr std::size_t kMemUnit = 1024;
+
+std::optional<double> time_derivation(const KdfParams& params) {
+    static constexpr std::array<std::uint8_t, 16> password{};
+    static constexpr std::array<std::uint8_t, kdf::salt_bytes> salt{};
+    const auto start = std::chrono::steady_clock::now();
+    const auto kek = derive_kek(password, salt, params);
+    if (!kek) {
+        return std::nullopt;
+    }
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+std::size_t whole_units(double bytes, std::size_t low, std::size_t high) {
+    const double clamped = std::clamp(bytes, static_cast<double>(low), static_cast<double>(high));
+    return std::max(low, static_cast<std::size_t>(clamped) / kMemUnit * kMemUnit);
+}
+
+}
+
+std::expected<KdfChoices, KdfError> benchmark_kdf(const KdfBenchmarkOptions& options) {
+    if (options.budget_seconds <= 0.0 || options.ops_limit == 0 || options.min_mem < kMemUnit ||
+        options.max_mem < options.min_mem) {
+        return std::unexpected(KdfError::InvalidParams);
+    }
+    const KdfParams smallest{options.ops_limit, options.min_mem};
+    const auto reference = time_derivation(smallest);
+    if (!reference) {
+        return std::unexpected(KdfError::DerivationFailed);
+    }
+    const double per_byte = std::max(*reference, 1e-9) / static_cast<double>(options.min_mem);
+    KdfChoices out{};
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const double target = options.budget_seconds * options.shares[i];
+        KdfParams params{options.ops_limit, whole_units(target / per_byte, options.min_mem, options.max_mem)};
+        std::optional<double> seconds = params == smallest ? reference : time_derivation(params);
+        while (!seconds && params.mem_limit > options.min_mem) {
+            params.mem_limit = whole_units(static_cast<double>(params.mem_limit) / 2.0, options.min_mem,
+                                           options.max_mem);
+            seconds = params == smallest ? reference : time_derivation(params);
+        }
+        if (!seconds) {
+            return std::unexpected(KdfError::DerivationFailed);
+        }
+        if (*seconds > target * options.overshoot && params.mem_limit > options.min_mem) {
+            params.mem_limit = whole_units(static_cast<double>(params.mem_limit) * target / *seconds,
+                                           options.min_mem, options.max_mem);
+            seconds = params == smallest ? reference : time_derivation(params);
+            if (!seconds) {
+                return std::unexpected(KdfError::DerivationFailed);
+            }
+        }
+        if (i > 0 && params.mem_limit < out[i - 1].params.mem_limit) {
+            out[i] = out[i - 1];
+        } else {
+            out[i] = {params, *seconds};
+        }
+    }
+    return out;
 }
 
 } // namespace cypherarx

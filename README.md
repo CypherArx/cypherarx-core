@@ -85,6 +85,18 @@ languages or about the user. The function only judges: `Vault::create` and
 the verdict. The password is copied once into guarded memory for the call; what zxcvbn-c
 allocates while it works is ordinary memory.
 
+`benchmark_kdf` (`cypherarx/kdf.hpp`) measures this machine and returns three sets of
+Argon2id parameters, light, standard and strong, each with the seconds one derivation took
+(design document §8). The strong one aims at the budget (2 seconds by default), the others
+at a half and a quarter of it. The time cost stays at 3 passes and the memory is what
+varies, between 64 MiB and 1 GiB: one derivation at the smallest size gives the time per
+byte, each choice is sized from that and then timed for real, and a choice that came out
+more than 15% over its target is sized down once and timed again. A size the machine
+cannot allocate is halved until it can. On a slow machine all three may be the smallest
+size, and on a fast one all three may be the largest. The whole call takes about twice the
+budget. The parameters go into `Vault::create` or `change_master_password` and are stored
+in the vault, so it opens on any machine, where the same parameters may take longer.
+
 The repository has a submodule, so clone with `--recursive` or run
 `git submodule update --init --recursive`.
 

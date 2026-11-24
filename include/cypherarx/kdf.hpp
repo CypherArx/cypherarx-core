@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -51,5 +52,23 @@ std::expected<Secret, KdfError>
 derive_kek(std::span<const std::uint8_t> password,
            std::span<const std::uint8_t> salt,
            const KdfParams& params);
+
+struct KdfBenchmarkOptions {
+    double budget_seconds = 2.0;
+    std::array<double, 3> shares{0.25, 0.5, 1.0};
+    std::uint64_t ops_limit = 3;
+    std::size_t min_mem = std::size_t{64} * 1024 * 1024;
+    std::size_t max_mem = std::size_t{1024} * 1024 * 1024;
+    double overshoot = 1.15;
+};
+
+struct KdfChoice {
+    KdfParams params;
+    double seconds;
+};
+
+using KdfChoices = std::array<KdfChoice, 3>;
+
+std::expected<KdfChoices, KdfError> benchmark_kdf(const KdfBenchmarkOptions& options = {});
 
 } // namespace cypherarx
