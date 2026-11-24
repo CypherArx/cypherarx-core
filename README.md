@@ -13,8 +13,8 @@ free-form fields, multi-persona accounts) that mainstream managers can't model.
 
 This is the **UI-free** core: cryptography, the KEK/DEK key hierarchy, encrypted
 SQLite storage, entry/field logic, password generation, TOTP, and CSV import. It exposes
-a **library API only** — there is **no CLI** (by design) and **no UI** (the Dear ImGui
-GUI lives in a separate repository, `cypherarx-gui`).
+a **library API only** — there is **no CLI** (by design) and **no UI** (the GUI lives in a
+separate repository, `cypherarx-gui`).
 
 Vault paths are `std::filesystem::path`; the core converts them to UTF-8 for SQLite
 itself, so non-ASCII paths work on every platform.
@@ -245,11 +245,16 @@ tests/               GoogleTest unit tests
 
 ## Design
 
-The cryptographic design (keys, what is encrypted, what the file shows, what is not
-protected) is in [docs/crypto.md](docs/crypto.md).
+The design is in [docs/](docs/):
 
-The canonical design document is in the org repository:
-`claude-handover/cypherarx-design-final.md`.
+- [docs/design.md](docs/design.md): purpose, structure, principles
+- [docs/crypto.md](docs/crypto.md): keys, what is encrypted, what the file shows, what is
+  not protected
+- [docs/data-model.md](docs/data-model.md): tables, the two-parent model of entries, the
+  schema
+
+Section numbers (§) elsewhere in this README refer to an earlier, unpublished design
+document.
 
 ## License
 

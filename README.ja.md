@@ -13,7 +13,7 @@
 
 これは **UI を持たない** コアです: 暗号、KEK/DEK の鍵階層、暗号化 SQLite ストレージ、
 エントリ／フィールドのロジック、パスワード生成、TOTP、CSV のインポート。**ライブラリ API のみ**を
-公開し、**CLI はありません**（設計上の判断）。**UI もありません**（Dear ImGui の GUI は別リポジトリ
+公開し、**CLI はありません**（設計上の判断）。**UI もありません**（GUI は別リポジトリ
 `cypherarx-gui` にあります）。
 
 金庫のパスは `std::filesystem::path` で受け取り、SQLite 向けの UTF-8 変換はコア側で行うため、
@@ -241,10 +241,14 @@ tests/               GoogleTest 単体テスト
 
 ## 設計
 
-暗号の設計（鍵、何を暗号化するか、ファイルから分かること、守らないもの）は
-[docs/crypto.ja.md](docs/crypto.ja.md) にあります。
+設計は [docs/](docs/) にあります。
 
-設計の正典は組織リポジトリの `claude-handover/cypherarx-design-final.md` にあります。
+- [docs/design.ja.md](docs/design.ja.md): 目的、構造、原則
+- [docs/crypto.ja.md](docs/crypto.ja.md): 鍵、何を暗号化するか、ファイルから分かること、
+  守らないもの
+- [docs/data-model.ja.md](docs/data-model.ja.md): 表、エントリの 2 つの親のモデル、スキーマ
+
+この README のほかの場所にある節番号（§）は、以前の、公開していない設計文書のものです。
 
 ## ライセンス
 
