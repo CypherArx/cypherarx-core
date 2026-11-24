@@ -1,5 +1,6 @@
 #include "cypherarx/vault.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <map>
@@ -59,7 +60,6 @@ constexpr const char* kSchema =
     "  icon_data TEXT,"
     "  sort_order INTEGER,"
     "  browser_extension_allowed INTEGER DEFAULT 1,"
-    "  dek_id INTEGER,"
     "  created_at TEXT,"
     "  updated_at TEXT,"
     "  uuid TEXT NOT NULL UNIQUE,"
@@ -75,7 +75,6 @@ constexpr const char* kSchema =
     "  notes_enc BLOB,"
     "  field_type TEXT NOT NULL,"
     "  linked_entry_id INTEGER,"
-    "  dek_id INTEGER,"
     "  uuid TEXT NOT NULL UNIQUE,"
     "  revision INTEGER DEFAULT 1,"
     "  updated_at TEXT NOT NULL,"
@@ -89,7 +88,6 @@ constexpr const char* kSchema =
     "  linked_entry_id INTEGER,"
     "  notes_enc BLOB,"
     "  sort_order INTEGER,"
-    "  dek_id INTEGER,"
     "  uuid TEXT NOT NULL UNIQUE,"
     "  revision INTEGER DEFAULT 1,"
     "  updated_at TEXT NOT NULL,"
@@ -102,7 +100,6 @@ constexpr const char* kSchema =
     "  name_enc BLOB NOT NULL,"
     "  is_preset INTEGER DEFAULT 0,"
     "  sort_order INTEGER,"
-    "  dek_id INTEGER,"
     "  uuid TEXT NOT NULL UNIQUE,"
     "  revision INTEGER DEFAULT 1,"
     "  updated_at TEXT NOT NULL,"
@@ -112,7 +109,6 @@ constexpr const char* kSchema =
     "CREATE TABLE IF NOT EXISTS tags ("
     "  id INTEGER PRIMARY KEY,"
     "  name_enc BLOB NOT NULL,"
-    "  dek_id INTEGER,"
     "  uuid TEXT NOT NULL UNIQUE,"
     "  revision INTEGER DEFAULT 1,"
     "  updated_at TEXT NOT NULL,"
@@ -127,13 +123,11 @@ constexpr const char* kSchema =
     "CREATE TABLE IF NOT EXISTS access_logs ("
     "  id INTEGER PRIMARY KEY,"
     "  value_enc BLOB NOT NULL,"
-    "  dek_id INTEGER,"
     "  uuid TEXT NOT NULL UNIQUE"
     ");"
     "CREATE TABLE IF NOT EXISTS settings ("
     "  key TEXT PRIMARY KEY,"
-    "  value_enc BLOB NOT NULL,"
-    "  dek_id INTEGER"
+    "  value_enc BLOB NOT NULL"
     ");";
 
 // Seeded once per vault (§10.3). Encrypted like custom names so the column has one shape.
@@ -151,6 +145,85 @@ VaultError map_key_error(VaultKeyError e) {
 
 bool exec(sqlite3* db, const char* sql) {
     return sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
+}
+
+constexpr int kOldestFormatVersion = 1;
+constexpr const char* kPersonaTable = "entries";
+constexpr const char* kPersonaColumn = "persona_id";
+constexpr const char* kKeyIdColumn = "dek_id";
+constexpr const char* kKeyIdTables[] = {"entries", "fields", "login_methods", "categories",
+                                        "tags",    "access_logs", "settings"};
+
+std::optional<int> format_version(sqlite3* db) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &st, nullptr) != SQLITE_OK) {
+        return std::nullopt;
+    }
+    std::optional<int> version;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        version = sqlite3_column_int(st, 0);
+    }
+    sqlite3_finalize(st);
+    return version;
+}
+
+bool set_format_version(sqlite3* db, int version) {
+    return exec(db, std::format("PRAGMA user_version={}", version).c_str());
+}
+
+std::optional<bool> has_column(sqlite3* db, const char* table, const char* column) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info(?) WHERE name=?", -1, &st, nullptr) !=
+        SQLITE_OK) {
+        return std::nullopt;
+    }
+    sqlite3_bind_text(st, 1, table, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, column, -1, SQLITE_STATIC);
+    const int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        return std::nullopt;
+    }
+    return rc == SQLITE_ROW;
+}
+
+bool upgrade_to_2(sqlite3* db) {
+    const auto persona = has_column(db, kPersonaTable, kPersonaColumn);
+    if (!persona) {
+        return false;
+    }
+    if (!*persona &&
+        !exec(db, std::format("ALTER TABLE {} ADD COLUMN {} INTEGER", kPersonaTable, kPersonaColumn).c_str())) {
+        return false;
+    }
+    for (const char* table : kKeyIdTables) {
+        const auto present = has_column(db, table, kKeyIdColumn);
+        if (!present) {
+            return false;
+        }
+        if (*present && !exec(db, std::format("ALTER TABLE {} DROP COLUMN {}", table, kKeyIdColumn).c_str())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool migrate(sqlite3* db, int from) {
+    if (from >= kVaultFormatVersion) {
+        return true;
+    }
+    if (!exec(db, "BEGIN IMMEDIATE")) {
+        return false;
+    }
+    bool ok = exec(db, kSchema);
+    if (ok && from < 2) {
+        ok = upgrade_to_2(db);
+    }
+    ok = ok && set_format_version(db, kVaultFormatVersion) && exec(db, "COMMIT");
+    if (!ok) {
+        exec(db, "ROLLBACK");
+    }
+    return ok;
 }
 
 bool set_meta(sqlite3* db, const char* key, std::span<const std::uint8_t> value) {
@@ -245,10 +318,10 @@ Vault::create(const std::filesystem::path& path, std::span<const std::uint8_t> p
     if (!keys) {
         return std::unexpected(map_key_error(keys.error()));
     }
-    if (!store_material(vault.impl_->db, keys->second)) {
+    if (!store_material(vault.impl_->db, keys->second) ||
+        !set_format_version(vault.impl_->db, kVaultFormatVersion)) {
         return std::unexpected(VaultError::DatabaseError);
     }
-    exec(vault.impl_->db, "PRAGMA user_version=1;");
 
     vault.impl_->dek = std::move(keys->first);
     vault.impl_->unlocked = true;
@@ -271,14 +344,13 @@ Vault::open(const std::filesystem::path& path, std::span<const std::uint8_t> pas
                         SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::CannotOpenFile);
     }
-    // Idempotent: brings older vaults up to the current schema.
-    if (!exec(vault.impl_->db, kSchema)) {
+    const auto version = format_version(vault.impl_->db);
+    if (!version) {
         return std::unexpected(VaultError::DatabaseError);
     }
-    // Migration: add entries.persona_id to vaults created before the two-parent model (§10.1.1).
-    // Harmlessly fails (ignored) when the column already exists.
-    sqlite3_exec(vault.impl_->db, "ALTER TABLE entries ADD COLUMN persona_id INTEGER", nullptr,
-                 nullptr, nullptr);
+    if (*version > kVaultFormatVersion) {
+        return std::unexpected(VaultError::NewerFormat);
+    }
 
     const auto material = load_material(vault.impl_->db);
     if (!material) {
@@ -287,6 +359,9 @@ Vault::open(const std::filesystem::path& path, std::span<const std::uint8_t> pas
     auto dek = unlock_vault(password, *material);
     if (!dek) {
         return std::unexpected(map_key_error(dek.error()));
+    }
+    if (!migrate(vault.impl_->db, std::max(*version, kOldestFormatVersion))) {
+        return std::unexpected(VaultError::DatabaseError);
     }
 
     vault.impl_->dek = std::move(dek).value();
@@ -436,8 +511,8 @@ std::expected<Entry, VaultError> Vault::add_entry(const Entry& in) {
 
     static const char* sql =
         "INSERT INTO entries(parent_id,persona_id,entry_type,label_enc,url_enc,login_url_enc,"
-        "display_name_enc,notes_enc,dek_id,created_at,updated_at,uuid,revision,category_id,"
-        "is_favorite) VALUES(?,?,?,?,?,?,?,?,1,?,?,?,1,?,?)";
+        "display_name_enc,notes_enc,created_at,updated_at,uuid,revision,category_id,"
+        "is_favorite) VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
@@ -612,8 +687,8 @@ Vault::add_field(std::int64_t entry_id, const std::string& label, const std::str
     }
 
     static const char* sql =
-        "INSERT INTO fields(entry_id,label_enc,value_enc,notes_enc,field_type,dek_id,uuid,"
-        "revision,updated_at) VALUES(?,?,?,?,?,1,?,1,?)";
+        "INSERT INTO fields(entry_id,label_enc,value_enc,notes_enc,field_type,uuid,"
+        "revision,updated_at) VALUES(?,?,?,?,?,?,1,?)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
@@ -802,8 +877,8 @@ Vault::add_login_method(std::int64_t entry_id, const std::string& method_type,
     }
 
     static const char* sql =
-        "INSERT INTO login_methods(entry_id,method_type,linked_entry_id,notes_enc,dek_id,uuid,"
-        "revision,updated_at) VALUES(?,?,?,?,1,?,1,?)";
+        "INSERT INTO login_methods(entry_id,method_type,linked_entry_id,notes_enc,uuid,"
+        "revision,updated_at) VALUES(?,?,?,?,?,1,?)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &st, nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
@@ -1053,8 +1128,8 @@ bool Vault::seed_presets() {
         return false;
     }
     static const char* sql =
-        "INSERT INTO categories(parent_id,name_enc,is_preset,dek_id,uuid,revision,updated_at) "
-        "VALUES(?,?,?,1,?,1,?)";
+        "INSERT INTO categories(parent_id,name_enc,is_preset,uuid,revision,updated_at) "
+        "VALUES(?,?,?,?,1,?)";
     for (const char* name : kPresetCategories) {
         if (!insert_named(impl_->db, impl_->dek.bytes(), sql, name, new_uuid(), std::nullopt, 1,
                           true)) {
@@ -1075,8 +1150,8 @@ Vault::add_category(const std::string& name, std::optional<std::int64_t> parent_
     c.name = name;
     c.uuid = new_uuid();
     static const char* sql =
-        "INSERT INTO categories(parent_id,name_enc,is_preset,dek_id,uuid,revision,updated_at) "
-        "VALUES(?,?,?,1,?,1,?)";
+        "INSERT INTO categories(parent_id,name_enc,is_preset,uuid,revision,updated_at) "
+        "VALUES(?,?,?,?,1,?)";
     auto id = insert_named(impl_->db, impl_->dek.bytes(), sql, name, c.uuid, parent_id, 0, true);
     if (!id) {
         return std::unexpected(VaultError::DatabaseError);
@@ -1206,7 +1281,7 @@ std::expected<Tag, VaultError> Vault::add_tag(const std::string& name) {
     t.name = name;
     t.uuid = new_uuid();
     static const char* sql =
-        "INSERT INTO tags(name_enc,dek_id,uuid,revision,updated_at) VALUES(?,1,?,1,?)";
+        "INSERT INTO tags(name_enc,uuid,revision,updated_at) VALUES(?,?,1,?)";
     auto id = insert_named(impl_->db, impl_->dek.bytes(), sql, name, t.uuid, std::nullopt, 0, false);
     if (!id) {
         return std::unexpected(VaultError::DatabaseError);
@@ -1414,7 +1489,7 @@ bool put_setting(sqlite3* db, std::span<const std::uint8_t> dek, const char* key
     if (!enc) {
         return false;
     }
-    static const char* sql = "INSERT INTO settings(key,value_enc,dek_id) VALUES(?,?,1) "
+    static const char* sql = "INSERT INTO settings(key,value_enc) VALUES(?,?) "
                              "ON CONFLICT(key) DO UPDATE SET value_enc=excluded.value_enc";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -1595,7 +1670,7 @@ Vault::record_access(std::int64_t entry_id, AccessAction action, std::int64_t no
         return std::unexpected(VaultError::Internal);
     }
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(impl_->db, "INSERT INTO access_logs(value_enc,uuid,dek_id) VALUES(?,?,1)", -1, &st,
+    if (sqlite3_prepare_v2(impl_->db, "INSERT INTO access_logs(value_enc,uuid) VALUES(?,?)", -1, &st,
                            nullptr) != SQLITE_OK) {
         return std::unexpected(VaultError::DatabaseError);
     }

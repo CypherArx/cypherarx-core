@@ -168,7 +168,7 @@ TEST_F(SettingsTest, MissingAndUnknownKeysAreTolerated) {
 }
 
 TEST_F(SettingsTest, OlderVaultWithoutTheTableGetsItOnOpen) {
-    run_sql("DROP TABLE settings");
+    run_sql("DROP TABLE settings; PRAGMA user_version=1");
     EXPECT_EQ(vault_->settings().value(), Settings{});
     ASSERT_TRUE(vault_->set_settings(changed()).has_value());
     EXPECT_EQ(vault_->settings().value(), changed());

@@ -34,7 +34,10 @@ enum class VaultError {
     Internal,             ///< Unexpected internal error (e.g. encryption failure).
     InvalidValue,
     ScrubFailed,
+    NewerFormat,
 };
+
+inline constexpr int kVaultFormatVersion = 2;
 
 /// An encrypted vault backed by a single SQLite file. Owns the in-memory DEK once
 /// unlocked. Move-only; the DEK is wiped on destruction. This is the persistence entry

@@ -19,6 +19,16 @@ GUI lives in a separate repository, `cypherarx-gui`).
 Vault paths are `std::filesystem::path`; the core converts them to UTF-8 for SQLite
 itself, so non-ASCII paths work on every platform.
 
+A vault file carries a format version (`kVaultFormatVersion` in `cypherarx/vault.hpp`, now
+2; stored as SQLite's `user_version`). `Vault::create` writes the current one. `Vault::open`
+reads it before anything else: a file with a higher version is refused with `NewerFormat`
+and is not changed. A file with a lower version is brought up to the current format after
+the password has been checked, in one transaction that also writes the new version, so a
+wrong password or a failure leaves the file as it was. A file with no version is treated
+as version 1. Version 2 dropped the `dek_id` column that version 1 had in every table with
+encrypted values (always 1, never read). **The format may still change without notice
+while the project is pre-alpha.**
+
 Vault settings (`cypherarx/settings.hpp`, `Vault::settings` and `Vault::set_settings`) are
 the values that belong to one vault and may be read only after it is unlocked: how long the
 access log is kept, the session length, the idle lock and so on. The core stores them and

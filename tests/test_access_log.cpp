@@ -203,7 +203,7 @@ TEST_F(AccessLogTest, RecordCopiedOverAnotherRowIsCorrupt) {
 
 TEST_F(AccessLogTest, OlderVaultWithoutTheTableGetsItOnOpen) {
     const Entry a = service("A");
-    run_sql("DROP TABLE access_logs");
+    run_sql("DROP TABLE access_logs; PRAGMA user_version=1");
     EXPECT_TRUE(vault_->access_records(kNow).value().empty());
     ASSERT_TRUE(vault_->record_access(a.id, AccessAction::view, kNow).has_value());
     EXPECT_EQ(vault_->access_records(kNow).value().size(), 1u);
