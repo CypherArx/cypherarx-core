@@ -42,6 +42,18 @@ TEST(StrengthTest, ARepeatedCharacterIsRejected) {
     EXPECT_EQ(measure("aaaaaaaaaaaaaaaa").verdict, PasswordVerdict::Rejected);
 }
 
+TEST(StrengthTest, TwoCommonWordsAndANumberGetAWarning) {
+    const PasswordStrength s = measure("applebanana12");
+    EXPECT_EQ(s.score, 2);
+    EXPECT_EQ(s.verdict, PasswordVerdict::Warn);
+}
+
+TEST(StrengthTest, TwoLessCommonWordsGetAdvice) {
+    const PasswordStrength s = measure("kettle-bluebird");
+    EXPECT_EQ(s.score, 3);
+    EXPECT_EQ(s.verdict, PasswordVerdict::Advise);
+}
+
 TEST(StrengthTest, ALongRandomPasswordIsOk) {
     const PasswordStrength s = measure("vQ8#rT2m!Zx6pL9wKd4s");
     EXPECT_EQ(s.score, 4);
