@@ -105,9 +105,17 @@ version (1 byte, = 1) ‖ nonce (24 bytes) ‖ ciphertext ‖ tag (16 bytes)
 
 ### Associated data
 
-Each encryption authenticates a short text that names where the value belongs. Decrypting
-with different associated data fails, so a ciphertext copied to another row or another
-column is detected.
+The tag at the end of a blob is what detects tampering. It is computed from the key, the
+nonce and the ciphertext; decryption computes it again and fails if it does not match.
+
+Associated data is one more input to that computation. It is not encrypted and it is not
+stored: the same data has to be supplied again to decrypt, or the tag does not match. This
+ties a ciphertext to something outside it.
+
+Here the associated data is a short text that names where the value belongs: which row and
+which column. To decrypt a value, the core supplies the text for the row and column it is
+reading from. A ciphertext copied to another row or another column was encrypted with a
+different text, so it fails to decrypt.
 
 For a stored value the associated data is `<scope>|<kind>`:
 
