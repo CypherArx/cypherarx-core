@@ -56,7 +56,6 @@ public:
     static std::expected<Vault, VaultError>
     open(const std::filesystem::path& path, std::span<const std::uint8_t> password);
 
-    /// Change the master password: KEK is regenerated, the DEK (and all data) is unchanged.
     std::expected<void, VaultError>
     change_master_password(std::span<const std::uint8_t> old_password,
                            std::span<const std::uint8_t> new_password,
@@ -159,6 +158,9 @@ public:
 private:
     Vault();
     bool seed_presets();
+    std::expected<void, VaultError> rekey(std::span<const std::uint8_t> password,
+                                          std::span<const std::uint8_t> new_password,
+                                          const KdfParams* new_params);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

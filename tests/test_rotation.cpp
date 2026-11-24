@@ -332,6 +332,50 @@ TEST_F(RotationTest, DeletedRowsAreReencryptedToo) {
     EXPECT_NE(old_values.front(), new_values.front());
 }
 
+TEST_F(RotationTest, ChangingThePasswordReplacesTheKeyAndEveryValue) {
+    const Snapshot values = snapshot();
+    const auto before = encrypted_blobs();
+    const Blob old_key = wrapped_dek();
+    ASSERT_TRUE(vault_
+                    ->change_master_password(bytes("master-pass"), bytes("new-pass"),
+                                             KdfParams::interactive())
+                    .has_value());
+    const auto after = encrypted_blobs();
+    ASSERT_EQ(before.size(), after.size());
+    for (const auto& [name, blobs] : before) {
+        const std::vector<Blob>& now = after.at(name);
+        ASSERT_EQ(blobs.size(), now.size()) << name;
+        for (std::size_t i = 0; i < blobs.size(); ++i) {
+            EXPECT_NE(blobs[i], now[i]) << name << " row " << i << " kept its old ciphertext";
+        }
+    }
+    expect_same(values, snapshot());
+    vault_.reset();
+    const Blob file = file_bytes();
+    EXPECT_FALSE(contains(file, old_key));
+    for (const auto& [name, blobs] : before) {
+        for (const Blob& blob : blobs) {
+            EXPECT_FALSE(contains(file, blob)) << name;
+        }
+    }
+    EXPECT_EQ(Vault::open(path_, bytes("master-pass")).error(), VaultError::WrongPassword);
+    reopen("new-pass");
+    expect_same(values, snapshot());
+}
+
+TEST_F(RotationTest, AWrongOldPasswordChangesNothing) {
+    const auto blobs = encrypted_blobs();
+    const Blob key = wrapped_dek();
+    EXPECT_EQ(vault_
+                  ->change_master_password(bytes("not-the-password"), bytes("new-pass"),
+                                           KdfParams::interactive())
+                  .error(),
+              VaultError::WrongPassword);
+    EXPECT_EQ(blobs, encrypted_blobs());
+    EXPECT_EQ(key, wrapped_dek());
+    reopen();
+}
+
 TEST_F(RotationTest, WritingAndChangingThePasswordWorkAfterRotation) {
     ASSERT_TRUE(vault_->rotate_key(bytes("master-pass")).has_value());
     ASSERT_TRUE(vault_->add_tag("after").has_value());

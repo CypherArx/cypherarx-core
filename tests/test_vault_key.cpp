@@ -48,31 +48,6 @@ TEST_F(VaultKeyTest, UnlockWithWrongPasswordFails) {
     EXPECT_EQ(r.error(), VaultKeyError::WrongPassword);
 }
 
-TEST_F(VaultKeyTest, ChangePasswordKeepsDekAndInvalidatesOld) {
-    auto created = create_vault_keys(pw("old-pass"), KdfParams::interactive()).value();
-    const Secret& dek = created.first;
-
-    const auto next = change_master_password(pw("old-pass"), created.second,
-                                             pw("new-pass"), KdfParams::interactive());
-    ASSERT_TRUE(next.has_value());
-
-    // Old password no longer unlocks the new material.
-    EXPECT_FALSE(unlock_vault(pw("old-pass"), *next).has_value());
-
-    // New password recovers the SAME DEK (field data never re-encrypted).
-    const auto bynew = unlock_vault(pw("new-pass"), *next);
-    ASSERT_TRUE(bynew.has_value());
-    EXPECT_TRUE(same(dek, *bynew));
-}
-
-TEST_F(VaultKeyTest, ChangePasswordWithWrongOldFails) {
-    auto created = create_vault_keys(pw("old-pass"), KdfParams::interactive()).value();
-    const auto r = change_master_password(pw("nope"), created.second,
-                                          pw("new-pass"), KdfParams::interactive());
-    ASSERT_FALSE(r.has_value());
-    EXPECT_EQ(r.error(), VaultKeyError::WrongPassword);
-}
-
 TEST_F(VaultKeyTest, CorruptWrappedDekFailsToUnlock) {
     auto created = create_vault_keys(pw("master"), KdfParams::interactive()).value();
     auto mat = created.second;

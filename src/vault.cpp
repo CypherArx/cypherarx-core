@@ -301,34 +301,7 @@ std::expected<void, VaultError>
 Vault::change_master_password(std::span<const std::uint8_t> old_password,
                               std::span<const std::uint8_t> new_password,
                               const KdfParams& new_params) {
-    if (!is_unlocked()) {
-        return std::unexpected(VaultError::NotUnlocked);
-    }
-
-    const auto current = load_material(impl_->db);
-    if (!current) {
-        return std::unexpected(VaultError::Corrupt);
-    }
-
-    // Verifies the old password and re-wraps the same DEK under the new password.
-    auto next = ::cypherarx::change_master_password(old_password, *current, new_password,
-                                                    new_params);
-    if (!next) {
-        return std::unexpected(map_key_error(next.error()));
-    }
-
-    if (!exec(impl_->db, "BEGIN")) {
-        return std::unexpected(VaultError::DatabaseError);
-    }
-    if (!store_material(impl_->db, *next)) {
-        exec(impl_->db, "ROLLBACK");
-        return std::unexpected(VaultError::DatabaseError);
-    }
-    if (!exec(impl_->db, "COMMIT")) {
-        exec(impl_->db, "ROLLBACK");
-        return std::unexpected(VaultError::DatabaseError);
-    }
-    return {};
+    return rekey(old_password, new_password, &new_params);
 }
 
 // --- Entry / field storage ---
@@ -1763,6 +1736,12 @@ std::expected<void, VaultError> reencrypt_column(sqlite3* db, const EncryptedCol
 } // namespace
 
 std::expected<void, VaultError> Vault::rotate_key(std::span<const std::uint8_t> password) {
+    return rekey(password, password, nullptr);
+}
+
+std::expected<void, VaultError> Vault::rekey(std::span<const std::uint8_t> password,
+                                             std::span<const std::uint8_t> new_password,
+                                             const KdfParams* new_params) {
     if (!is_unlocked()) {
         return std::unexpected(VaultError::NotUnlocked);
     }
@@ -1774,7 +1753,7 @@ std::expected<void, VaultError> Vault::rotate_key(std::span<const std::uint8_t> 
     if (!verified) {
         return std::unexpected(map_key_error(verified.error()));
     }
-    auto keys = create_vault_keys(password, current->params);
+    auto keys = create_vault_keys(new_password, new_params ? *new_params : current->params);
     if (!keys) {
         return std::unexpected(map_key_error(keys.error()));
     }

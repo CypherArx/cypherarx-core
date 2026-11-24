@@ -85,37 +85,4 @@ unlock_vault(std::span<const std::uint8_t> password, const VaultKeyMaterial& mat
     return unwrap_dek(kek->bytes(), material.wrapped_dek);
 }
 
-std::expected<VaultKeyMaterial, VaultKeyError>
-change_master_password(std::span<const std::uint8_t> old_password,
-                       const VaultKeyMaterial& current,
-                       std::span<const std::uint8_t> new_password,
-                       const KdfParams& new_params) {
-    // Recover the DEK with the old password (this verifies the old password).
-    const auto dek = unlock_vault(old_password, current);
-    if (!dek) {
-        return std::unexpected(dek.error());
-    }
-
-    // Re-wrap the SAME DEK under the new password with a fresh salt. Field data untouched.
-    VaultKeyMaterial next;
-    next.params = new_params;
-    next.salt.resize(kdf::salt_bytes);
-    if (!generate_salt(next.salt)) {
-        return std::unexpected(VaultKeyError::Internal);
-    }
-
-    const auto new_kek = derive_kek(new_password, next.salt, new_params);
-    if (!new_kek) {
-        return std::unexpected(VaultKeyError::KdfFailed);
-    }
-
-    auto wrapped = wrap_dek(new_kek->bytes(), dek->bytes());
-    if (!wrapped) {
-        return std::unexpected(wrapped.error());
-    }
-    next.wrapped_dek = std::move(wrapped).value();
-
-    return next;
-}
-
 } // namespace cypherarx

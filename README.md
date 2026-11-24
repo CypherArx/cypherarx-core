@@ -60,9 +60,17 @@ happened and the call returns `ScrubFailed`. What the core cannot reach is outsi
 file: the rollback journal and the temporary file SQLite deletes, earlier copies and
 backups, and blocks the file system or an SSD has not yet reused. Rotation protects against
 a leaked DEK. It does not help against a leaked master password by itself, since the new
-DEK is wrapped under the same password, and changing the master password does not rotate
-the DEK: whoever has the old password and an old copy of the file can still read a newer
-copy unless the key is rotated as well.
+DEK is wrapped under the same password.
+
+Changing the master password (`Vault::change_master_password`) is the same operation with
+a new password and new KDF parameters: it verifies the old password, replaces the DEK,
+re-encrypts every value and rewrites the file, in the same transaction and with the same
+failure behaviour as a rotation. There is no way to change the password and keep the DEK.
+If the DEK stayed, whoever has the old password and an old copy of the file could take the
+DEK from that copy and read every later copy with it, which is the case a password is
+usually changed for. This differs from the design document (§7.4), which re-wraps the same
+DEK so that no value has to be re-encrypted. The old copy itself stays readable with the
+old password; nothing can change that.
 
 Import (`cypherarx/import.hpp`, `Vault::import_logins`) reads the CSV files that browsers
 and password managers export. `parse_logins_csv` works in place on the caller's buffer and

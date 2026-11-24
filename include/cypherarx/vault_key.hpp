@@ -51,13 +51,4 @@ create_vault_keys(std::span<const std::uint8_t> password, const KdfParams& param
 std::expected<Secret, VaultKeyError>
 unlock_vault(std::span<const std::uint8_t> password, const VaultKeyMaterial& material);
 
-/// Change the master password: verify the old password, then re-wrap the SAME DEK under a
-/// new password with a fresh salt and the given params. The DEK — and therefore all field
-/// data — is never re-encrypted (design §7.4). Returns the new material to persist.
-std::expected<VaultKeyMaterial, VaultKeyError>
-change_master_password(std::span<const std::uint8_t> old_password,
-                       const VaultKeyMaterial& current,
-                       std::span<const std::uint8_t> new_password,
-                       const KdfParams& new_params);
-
 } // namespace cypherarx
