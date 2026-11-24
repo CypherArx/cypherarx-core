@@ -2,3 +2,30 @@ cypherarx-core
 Copyright 2026 Capsicum
 
 This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+This product includes software from the following project:
+
+- zxcvbn-c (https://github.com/tsyrogit/zxcvbn-c)
+  Copyright (c) 2015-2017 Tony Evans. MIT License (external/zxcvbn-c/LICENSE.txt).
+  Included unchanged as the git submodule external/zxcvbn-c and compiled into the
+  library together with its word lists, which its README says are taken from the
+  original zxcvbn.
+
+The library is built with the following projects. They are not in this repository;
+the build fetches them with vcpkg, which installs each license text as
+share/<name>/copyright.
+
+- libsodium (https://libsodium.org)
+  Copyright (c) 2013-2026 Frank Denis. ISC License.
+
+- SQLite (https://www.sqlite.org)
+  Public domain.
+
+- miniz (https://github.com/richgel999/miniz)
+  Copyright 2013-2014 RAD Game Tools and Valve Software.
+  Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC. MIT License.
+
+The tests, and only the tests, are built with:
+
+- GoogleTest (https://github.com/google/googletest)
+  Copyright 2008, Google Inc. BSD 3-Clause License.

@@ -6,8 +6,9 @@
 native password manager for *complex* credential data (hierarchical entries,
 free-form fields, multi-persona accounts) that mainstream managers can't model.
 
-> **Status: pre-alpha, not for public use.** The repository is kept private during
-> development. The license is the Apache License 2.0 ([LICENSE](LICENSE)).
+> **Status: pre-alpha.** It has not been reviewed by anyone else, and the vault format may
+> change without notice. **Do not keep real passwords in it yet.** The license is the
+> Apache License 2.0 ([LICENSE](LICENSE)).
 
 ## Scope
 
@@ -58,8 +59,8 @@ and encrypts it with the new one (deleted rows too), and stores the new wrapped 
 fresh salt; then the new DEK replaces the old one in memory. A failure at any point, a wrong
 password or a value that does not decrypt leaves the vault exactly as it was. The old and
 the new key never coexist in the file, so there is no table of keys and no per-row key id
-to follow: this is simpler than the staged, resumable rotation of the design document
-(§6.2, §6.3), whose guarantee the transaction already gives. The encrypted columns are
+to follow. A staged, resumable rotation was considered and not adopted: the transaction
+already gives the guarantee it was meant to give. The encrypted columns are
 listed once, in `kEncryptedColumns` in `src/vault.cpp`; a new encrypted column must be
 added there, and `tests/test_rotation.cpp` fails for any column ending in `_enc` that the
 rotation left unchanged or that the test has no data for.
@@ -78,12 +79,12 @@ re-encrypts every value and rewrites the file, in the same transaction and with 
 failure behaviour as a rotation. There is no way to change the password and keep the DEK.
 If the DEK stayed, whoever has the old password and an old copy of the file could take the
 DEK from that copy and read every later copy with it, which is the case a password is
-usually changed for. This differs from the design document (§7.4), which re-wraps the same
-DEK so that no value has to be re-encrypted. The old copy itself stays readable with the
+usually changed for. Re-wrapping the same DEK, which would spare re-encrypting every
+value, was considered and not adopted for this reason. The old copy itself stays readable with the
 old password; nothing can change that.
 
-`master_password_strength` (`cypherarx/strength.hpp`) judges a candidate master password
-(design document §7.1). It returns the length in characters, an estimate of the number of
+`master_password_strength` (`cypherarx/strength.hpp`) judges a candidate master password.
+It returns the length in characters, an estimate of the number of
 guesses as a power of ten, a score from 0 to 4 (limits at 10^3, 10^6, 10^8 and 10^10
 guesses, as in zxcvbn) and a verdict: `TooShort` under 12 characters whatever the score,
 `Rejected` for scores 0 and 1, `Warn` for 2, `Advise` for 3 and `Ok` for 4. No character
@@ -96,8 +97,8 @@ the verdict. The password is copied once into guarded memory for the call; what 
 allocates while it works is ordinary memory.
 
 `benchmark_kdf` (`cypherarx/kdf.hpp`) measures this machine and returns three sets of
-Argon2id parameters, light, standard and strong, each with the seconds one derivation took
-(design document §8). The strong one aims at the budget (2 seconds by default), the others
+Argon2id parameters, light, standard and strong, each with the seconds one derivation took.
+The strong one aims at the budget (2 seconds by default), the others
 at a half and a quarter of it. The time cost stays at 3 passes and the memory is what
 varies, between 64 MiB and 1 GiB: one derivation at the smallest size gives the time per
 byte, each choice is sized from that and then timed for real, and a choice that came out
@@ -253,10 +254,7 @@ The design is in [docs/](docs/):
 - [docs/data-model.md](docs/data-model.md): tables, the two-parent model of entries, the
   schema
 
-Section numbers (§) elsewhere in this README refer to an earlier, unpublished design
-document.
-
 ## License
 
 cypherarx-core is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
-The licenses of the libraries it is built with are not listed yet.
+NOTICE lists the libraries it is built with and their licenses.
