@@ -1,0 +1,3 @@
+[submodule "external/zxcvbn-c"]
+	path = external/zxcvbn-c
+	url = https://github.com/tsyrogit/zxcvbn-c

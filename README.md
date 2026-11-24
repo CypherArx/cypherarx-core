@@ -72,6 +72,22 @@ usually changed for. This differs from the design document (§7.4), which re-wra
 DEK so that no value has to be re-encrypted. The old copy itself stays readable with the
 old password; nothing can change that.
 
+`master_password_strength` (`cypherarx/strength.hpp`) judges a candidate master password
+(design document §7.1). It returns the length in characters, an estimate of the number of
+guesses as a power of ten, a score from 0 to 4 (limits at 10^3, 10^6, 10^8 and 10^10
+guesses, as in zxcvbn) and a verdict: `TooShort` under 12 characters whatever the score,
+`Rejected` for scores 0 and 1, `Warn` for 2, `Advise` for 3 and `Ok` for 4. No character
+class is required. The estimate comes from zxcvbn-c (MIT, the `external/zxcvbn-c`
+submodule, built here with its dictionaries compiled in), so it knows English words, names,
+common passwords, keyboard runs, repeats, sequences and dates, and nothing about other
+languages or about the user. The function only judges: `Vault::create` and
+`change_master_password` accept any password, and the application decides what to do with
+the verdict. The password is copied once into guarded memory for the call; what zxcvbn-c
+allocates while it works is ordinary memory.
+
+The repository has a submodule, so clone with `--recursive` or run
+`git submodule update --init --recursive`.
+
 Import (`cypherarx/import.hpp`, `Vault::import_logins`) reads the CSV files that browsers
 and password managers export. `parse_logins_csv` works in place on the caller's buffer and
 returns views into it, so the caller can keep the file in guarded memory and wipe it once.
