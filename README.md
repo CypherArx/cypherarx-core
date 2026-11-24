@@ -122,8 +122,7 @@ under `History` (earlier versions of an entry) are left out, and so is the group
 `RecycleBinUUID` with everything below it, unless `RecycleBinEnabled` is `False`. The
 reader is a small one of its own: elements, attributes, the five named entities, numeric
 character references, CDATA, comments and processing instructions, with line ends turned
-into `
-`; no DTD, no namespaces, UTF-8 only. A document whose root is not `KeePassFile`
+into `\n`; no DTD, no namespaces, UTF-8 only. A document whose root is not `KeePassFile`
 is `Unsupported`, markup that does not nest or an unknown entity is `Malformed`, and a
 `Value` marked `Protected="True"` is `Protected`: that is the inner XML of a database file,
 whose values are still encrypted, not an export. **It has been tested with XML written by
