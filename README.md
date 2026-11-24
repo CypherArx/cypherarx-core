@@ -116,6 +116,15 @@ already there, so importing a file twice adds nothing; a changed password in the
 file is therefore not picked up. Entries already in the vault are never changed. The
 summary counts what was added and what was skipped.
 
+`erase_file` (`cypherarx/erase.hpp`) is for the exported file once it has been imported: it
+writes zeros over the whole file, flushes them to the disk, and removes the file.
+`overwrite_file` is the first half alone. Only a regular file is accepted; a directory, a
+symbolic link or a missing path is `NotAFile` and nothing is touched. The overwrite reaches
+the blocks the file occupies now, as far as the file system writes in place. It does not
+reach what the core cannot see: blocks an SSD or a copy-on-write file system has remapped,
+earlier copies, backups, cloud sync, the browser's own download history and the recycle
+bin copy of a file that was deleted by hand before.
+
 `Vault::merge_service(source, target)` makes two services one, in one transaction, for
 services that turned out to be the same (one made by hand, one imported). The target keeps
 its name and category. The source's accounts move under the target, its URL fields move to
