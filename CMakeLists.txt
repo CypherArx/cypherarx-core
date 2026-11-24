@@ -71,6 +71,7 @@ add_library(cypherarx_core
   src/crypto/totp.cpp
   src/erase.cpp
   src/import.cpp
+  src/import_keepass.cpp
   src/passgen.cpp
   src/strength.cpp
   src/vault.cpp
@@ -115,6 +116,7 @@ if(CYPHERARX_BUILD_TESTS)
     tests/test_rotation.cpp
     tests/test_erase.cpp
     tests/test_import.cpp
+    tests/test_import_keepass.cpp
     tests/test_merge.cpp
     tests/test_passgen.cpp
     tests/test_strength.cpp

@@ -24,9 +24,16 @@ enum class ImportError {
     NoHeader,
     NoSecretColumn,
     Malformed,
+    Protected,
+    Unsupported,
 };
 
+enum class ImportFormat { Csv, KeePassXml, OnePux };
+
+ImportFormat import_format(std::span<const char> data);
+
 std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_csv(std::span<char> data);
+std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_keepass_xml(std::span<char> data);
 
 std::string_view import_site(std::string_view url);
 std::string import_origin(std::string_view url);

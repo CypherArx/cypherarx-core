@@ -110,8 +110,27 @@ order and case (`name`/`title`, `url`/`uri`/`login_uri`/`website`,
 `note`/`notes`/`extra`/`comments`), and refuses a file with neither a password nor a TOTP
 column. Quoted fields, doubled quotes, line breaks inside a field, CRLF and a byte-order
 mark are handled. **It has been tested with headers shaped like those exports,
-not with files exported by the products themselves.** KeePass XML
-and 1Password 1PUX are not read.
+not with files exported by the products themselves.** 1Password 1PUX is not read.
+
+`parse_logins_keepass_xml` reads the unencrypted XML that KeePass 2 and KeePassXC export
+(`KeePassFile`), in place in the same way. Each `Entry` in any group gives one login from
+its strings `Title`, `UserName`, `Password`, `URL` and `Notes`; the one-time password comes
+from the first of the strings `otp` (KeePassXC, an `otpauth://` URL),
+`TimeOtp-Secret-Base32` (KeePass 2.47 and later) and `TOTP Seed` (older plugins). Other
+custom strings, attachments, tags, icons and the group names are not read. The entries
+under `History` (earlier versions of an entry) are left out, and so is the group named by
+`RecycleBinUUID` with everything below it, unless `RecycleBinEnabled` is `False`. The
+reader is a small one of its own: elements, attributes, the five named entities, numeric
+character references, CDATA, comments and processing instructions, with line ends turned
+into `
+`; no DTD, no namespaces, UTF-8 only. A document whose root is not `KeePassFile`
+is `Unsupported`, markup that does not nest or an unknown entity is `Malformed`, and a
+`Value` marked `Protected="True"` is `Protected`: that is the inner XML of a database file,
+whose values are still encrypted, not an export. **It has been tested with XML written by
+hand after the format, not with files exported by KeePass or KeePassXC.**
+
+`import_format` tells the three formats apart from the first bytes: `PK` is a 1PUX archive,
+a `<` after an optional byte-order mark and white space is XML, anything else is CSV.
 
 `import_logins` stores the rows in one transaction, as services and accounts.
 

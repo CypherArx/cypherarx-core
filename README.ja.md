@@ -108,7 +108,27 @@ KDF のパラメータで行う、同じ操作です。古いパスワードを�
 `note`/`notes`/`extra`/`comments`）。パスワードの列も TOTP の列も無いファイルは拒否します。
 引用符で囲んだ値、二重の引用符、値の中の改行、CRLF、バイト順マークを扱えます。
 **テストは、それらの書き出しに似せた見出しで行っており、製品が実際に書き出した
-ファイルでは行っていません。** KeePass の XML と 1Password の 1PUX は読めません。
+ファイルでは行っていません。** 1Password の 1PUX は読めません。
+
+`parse_logins_keepass_xml` は、KeePass 2 と KeePassXC が書き出す暗号化されていない XML
+（`KeePassFile`）を、同じくバッファの中で読みます。どのグループにある `Entry` も 1 件の
+ログインになり、文字列 `Title`・`UserName`・`Password`・`URL`・`Notes` から作ります。
+ワンタイムパスワードは、文字列 `otp`（KeePassXC。`otpauth://` の URL）、
+`TimeOtp-Secret-Base32`（KeePass 2.47 以降）、`TOTP Seed`（古いプラグイン）のうち最初に
+あるものから取ります。それ以外の独自の文字列、添付ファイル、タグ、アイコン、グループの
+名前は読みません。`History` の下のエントリ（エントリの以前の版）は除きます。
+`RecycleBinUUID` が指すグループとその下のすべても除きます（`RecycleBinEnabled` が `False`
+のときは除きません）。読み取りは自前の小さなもので、要素、属性、5 つの名前付き実体、
+数値文字参照、CDATA、コメント、処理命令を扱い、改行は `
+` に揃えます。DTD と名前空間は
+扱わず、UTF-8 だけです。ルートが `KeePassFile` でない文書は `Unsupported`、入れ子が合わない
+マークアップや知らない実体は `Malformed`、`Protected="True"` の付いた `Value` は
+`Protected` です（それはデータベースのファイルの内側の XML で、値がまだ暗号化されており、
+書き出したものではありません）。**テストは、形式に従って手で書いた XML で行っており、
+KeePass や KeePassXC が実際に書き出したファイルでは行っていません。**
+
+`import_format` は、3 つの形式を先頭のバイトで見分けます。`PK` は 1PUX のアーカイブ、
+バイト順マークと空白（どちらも無くてもよい）のあとの `<` は XML、それ以外は CSV です。
 
 `import_logins` は、行を 1 つのトランザクションで、service と account として保存します。
 

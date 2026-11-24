@@ -41,6 +41,8 @@ constexpr std::array kAliases{
 constexpr char kQuote = '"';
 constexpr char kComma = ',';
 constexpr std::string_view kByteOrderMark = "\xEF\xBB\xBF";
+constexpr std::string_view kArchiveMark = "PK";
+constexpr char kMarkupOpen = '<';
 constexpr std::string_view kBlanks = " \t";
 constexpr std::string_view kWhitespace = " \t\r\n";
 constexpr std::string_view kSchemeMark = "://";
@@ -204,6 +206,21 @@ std::expected<std::vector<ImportedLogin>, ImportError> parse_logins_csv(std::spa
         logins.push_back(login);
     }
     return logins;
+}
+
+ImportFormat import_format(std::span<const char> data) {
+    std::string_view text(data.data(), data.size());
+    if (text.starts_with(kArchiveMark)) {
+        return ImportFormat::OnePux;
+    }
+    if (text.starts_with(kByteOrderMark)) {
+        text.remove_prefix(kByteOrderMark.size());
+    }
+    const auto first = text.find_first_not_of(kWhitespace);
+    if (first != std::string_view::npos && text[first] == kMarkupOpen) {
+        return ImportFormat::KeePassXml;
+    }
+    return ImportFormat::Csv;
 }
 
 std::string_view import_site(std::string_view url) {
